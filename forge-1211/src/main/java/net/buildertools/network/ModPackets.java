@@ -4,6 +4,7 @@ import net.buildertools.BuilderToolsMod;
 import net.buildertools.network.packet.EntityDeletePacket;
 import net.buildertools.network.packet.EntityDuplicatePacket;
 import net.buildertools.network.packet.EntityFreezePacket;
+import net.buildertools.network.packet.EntitySpawnPacket;
 import net.buildertools.network.packet.EntityTransformPacket;
 import net.buildertools.network.packet.OffGridBlockPacket;
 import net.buildertools.network.packet.PaintPacket;
@@ -41,6 +42,7 @@ public final class ModPackets {
         register(SelectionCopyPacket.class, SelectionCopyPacket::encode, SelectionCopyPacket::decode, SelectionCopyPacket::handle);
         register(PastePacket.class, PastePacket::encode, PastePacket::decode, PastePacket::handle);
         register(EntityTransformPacket.class, EntityTransformPacket::encode, EntityTransformPacket::decode, EntityTransformPacket::handle);
+        register(EntitySpawnPacket.class, EntitySpawnPacket::encode, EntitySpawnPacket::decode, EntitySpawnPacket::handle);
         register(OffGridBlockPacket.class, OffGridBlockPacket::encode, OffGridBlockPacket::decode, OffGridBlockPacket::handle);
         register(EntityDeletePacket.class, EntityDeletePacket::encode, EntityDeletePacket::decode, EntityDeletePacket::handle);
         register(EntityDuplicatePacket.class, EntityDuplicatePacket::encode, EntityDuplicatePacket::decode, EntityDuplicatePacket::handle);

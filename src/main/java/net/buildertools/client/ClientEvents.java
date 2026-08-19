@@ -112,6 +112,8 @@ public final class ClientEvents {
                 }
             }
         } else if (item instanceof EntityToolItem) {
+            // Right-clicking a block never moves the selected entity anywhere; entity selection
+            // and free-move dragging happen on the entity hit itself (see onMouseButtonPre).
             event.setCanceled(true);
             if (event.getLevel().isClientSide()) {
                 if (EntityRotateState.isActive()) {
@@ -120,20 +122,6 @@ public final class ClientEvents {
                     player.playSound(ModSounds.ENTITY_ROTATE.get(), 1.0f, 1.0f);
                 } else if (player.isShiftKeyDown()) {
                     SelectionManager.clearSelectedEntity();
-                } else {
-                    Entity entity = SelectionManager.getSelectedEntity();
-                    if (entity != null && !entity.isRemoved()) {
-                        // Move the selected entity on top of the block that was clicked.
-                        BlockPos pos = event.getPos();
-                        ClientPackets.sendToServer(new EntityTransformPacket(
-                                entity.getId(),
-                                pos.getX() + 0.5,
-                                pos.getY() + 1.0,
-                                pos.getZ() + 0.5,
-                                entity.getYRot(),
-                                entity.getXRot(),
-                                false));
-                    }
                 }
             }
         } else if (item instanceof RulerToolItem) {
@@ -439,7 +427,7 @@ public final class ClientEvents {
         event.setCanceled(true);
         double delta = Math.signum(event.getScrollDeltaY());
         if (player.isShiftKeyDown()) {
-            // Move one block up/down.
+            // Shift + scroll: move one block up/down.
             ClientPackets.sendToServer(new EntityTransformPacket(
                     entity.getId(),
                     entity.getX(),
@@ -448,20 +436,23 @@ public final class ClientEvents {
                     entity.getYRot(),
                     entity.getXRot(),
                     false));
-            player.playSound(ModSounds.ENTITY_MOVE.get(), 1.0f, 1.0f);
         } else {
-            // Rotate in 22.5-degree increments.
-            float yaw = Math.round((entity.getYRot() + (float) delta * 22.5f) / 22.5f) * 22.5f;
+            // Scroll: move the entity closer (up) or farther (down) along the camera axis,
+            // Hytale-style - it stays on the ray under the cursor.
+            Vec3 eye = player.getEyePosition(1.0f);
+            Vec3 to = entity.position().subtract(eye);
+            double dist = Math.max(0.5, to.length() - delta);
+            Vec3 pos = eye.add(to.normalize().scale(dist));
             ClientPackets.sendToServer(new EntityTransformPacket(
                     entity.getId(),
-                    entity.getX(),
-                    entity.getY(),
-                    entity.getZ(),
-                    yaw,
+                    pos.x,
+                    pos.y,
+                    pos.z,
+                    entity.getYRot(),
                     entity.getXRot(),
                     false));
-            player.playSound(ModSounds.ENTITY_ROTATE.get(), 1.0f, 1.0f);
         }
+        player.playSound(ModSounds.ENTITY_MOVE.get(), 1.0f, 1.0f);
     }
 
     // ------------------------------------------------------------------
@@ -520,7 +511,8 @@ public final class ClientEvents {
         if (item instanceof EntityToolItem) {
             return new String[]{
                     "RMB select · RMB-hold drag · R rotate · Alt+R head",
-                    "scroll rotate · sneak+scroll up/down · X delete · J dup · G freeze"};
+                    "scroll closer/farther · sneak+scroll up/down · E interface",
+                    "X delete · J dup · G freeze"};
         }
         if (item instanceof RulerToolItem) {
             return new String[]{"LMB point A · RMB point B · sneak+RMB clear"};
@@ -557,7 +549,12 @@ public final class ClientEvents {
             return;
         }
         if (minecraft.options.keyInventory.consumeClick()) {
-            minecraft.setScreen(new CreativeSettingsScreen((net.minecraft.client.player.LocalPlayer) minecraft.player));
+            if (minecraft.player.getMainHandItem().getItem() instanceof EntityToolItem) {
+                // E with the Entity Tool held opens its Hytale-style spawn/rotate interface.
+                minecraft.setScreen(new EntityToolScreen((net.minecraft.client.player.LocalPlayer) minecraft.player));
+            } else {
+                minecraft.setScreen(new CreativeSettingsScreen((net.minecraft.client.player.LocalPlayer) minecraft.player));
+            }
         }
     }
 
@@ -760,11 +757,11 @@ public final class ClientEvents {
 
     /** Returns the solid off-grid block occupying the given cell, or null (client-side query). */
     private static OffGridBlockEntity findOffGridEntity(net.minecraft.world.level.Level level, BlockPos pos) {
+        // Entity tags are not synced to clients in 1.21.1, so the entity class alone identifies
+        // off-grid blocks here (all OffGridBlockEntity instances are off-grid blocks).
         for (OffGridBlockEntity block : level.getEntitiesOfClass(OffGridBlockEntity.class,
                 new AABB(pos.getX(), pos.getY(), pos.getZ(), pos.getX() + 1, pos.getY() + 1, pos.getZ() + 1))) {
-            if (block.getTags().contains(net.buildertools.server.BuilderServerHandler.OFF_GRID_TAG)) {
-                return block;
-            }
+            return block;
         }
         return null;
     }
@@ -792,11 +789,10 @@ public final class ClientEvents {
         Vec3 end = eye.add(dir.scale(reach));
         double best = Double.MAX_VALUE;
         OffGridHit bestHit = null;
+        // Entity tags are not synced to clients, so the entity class alone identifies off-grid
+        // blocks here (all OffGridBlockEntity instances are off-grid blocks).
         for (OffGridBlockEntity block : minecraft.level.getEntitiesOfClass(OffGridBlockEntity.class,
                 player.getBoundingBox().expandTowards(dir.scale(reach)).inflate(1.5))) {
-            if (!block.getTags().contains(net.buildertools.server.BuilderServerHandler.OFF_GRID_TAG)) {
-                continue;
-            }
             Optional<Vec3> hit = block.getBoundingBox().clip(eye, end);
             if (hit.isPresent()) {
                 double dist = eye.distanceToSqr(hit.get());

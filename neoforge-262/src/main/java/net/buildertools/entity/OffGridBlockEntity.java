@@ -20,6 +20,7 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 import org.jspecify.annotations.Nullable;
 
 import java.util.UUID;
@@ -97,22 +98,72 @@ public class OffGridBlockEntity extends Entity {
     @Override
     public void onSyncedDataUpdated(EntityDataAccessor<?> key) {
         super.onSyncedDataUpdated(key);
-        if (DATA_BLOCK_STATE.equals(key)) {
-            this.refreshDimensions();
+        // Keep the bounding box glued to the rotated visual: whenever the block or its rotation
+        // changes (server-side and after syncing to clients), re-center the entity on the visual's
+        // collision box and re-measure it, so the hitbox always matches what the player sees.
+        if (DATA_BLOCK_STATE.equals(key) || DATA_YAW.equals(key) || DATA_PITCH.equals(key)) {
+            if (this.level() != null) {
+                Vec3 center = visualCenter();
+                this.setPos(center.x, center.y, center.z);
+                this.refreshDimensions();
+            }
         }
     }
 
     /**
-     * Collision box matches the represented block's shape within the cell: full width/depth and
-     * the block's height from the cell floor, so slabs and stairs collide like they render.
+     * Collision box matches the rotated model, not the raw cell: the block shape is rotated by the
+     * placement yaw/pitch around the cell center (exactly like the rendered model), so a diagonal
+     * block collides along its true walls - no invisible bumps where the axis-aligned cell would
+     * stick out past the visual.
      */
     @Override
     public EntityDimensions getDimensions(Pose pose) {
-        BlockState state = getRepresentedState();
-        AABB box = state.getCollisionShape(this.level(), BlockPos.ZERO).bounds();
+        AABB box = visualCollisionBox();
         float w = (float) Math.max(box.getXsize(), box.getZsize());
         float h = (float) Math.max(box.getYsize(), 0.05f);
         return EntityDimensions.fixed(w, h);
+    }
+
+    /**
+     * The world-space collision box of the rotated model: the block's shape bounds rotated by the
+     * placement yaw/pitch around the cell center, mapped back onto the cell. Axis-aligned blocks
+     * keep the exact shape bounds of the cell.
+     */
+    public AABB visualCollisionBox() {
+        BlockState state = getRepresentedState();
+        AABB shape = state.getCollisionShape(this.level(), BlockPos.ZERO).bounds();
+        float yaw = getPlacementYaw();
+        float pitch = getPlacementPitch();
+        if (yaw == 0.0f && pitch == 0.0f) {
+            BlockPos c = cell();
+            return new AABB(c.getX() + shape.minX, c.getY() + shape.minY, c.getZ() + shape.minZ,
+                    c.getX() + shape.maxX, c.getY() + shape.maxY, c.getZ() + shape.maxZ);
+        }
+        org.joml.Quaternionf rot = net.buildertools.util.OffGridTransform.rotation(yaw, pitch);
+        double minX = 9, minY = 9, minZ = 9, maxX = -9, maxY = -9, maxZ = -9;
+        for (int i = 0; i < 8; i++) {
+            float px = (i & 1) == 0 ? (float) shape.minX : (float) shape.maxX;
+            float py = (i & 2) == 0 ? (float) shape.minY : (float) shape.maxY;
+            float pz = (i & 4) == 0 ? (float) shape.minZ : (float) shape.maxZ;
+            org.joml.Vector3f p = new org.joml.Vector3f(px - 0.5f, py - 0.5f, pz - 0.5f);
+            rot.transform(p);
+            p.add(0.5f, 0.5f, 0.5f);
+            minX = Math.min(minX, p.x);
+            maxX = Math.max(maxX, p.x);
+            minY = Math.min(minY, p.y);
+            maxY = Math.max(maxY, p.y);
+            minZ = Math.min(minZ, p.z);
+            maxZ = Math.max(maxZ, p.z);
+        }
+        BlockPos c = cell();
+        return new AABB(c.getX() + minX, c.getY() + minY, c.getZ() + minZ,
+                c.getX() + maxX, c.getY() + maxY, c.getZ() + maxZ);
+    }
+
+    /** The world position the entity must sit at so its bounding box equals the visual box. */
+    public Vec3 visualCenter() {
+        AABB box = visualCollisionBox();
+        return new Vec3(box.getCenter().x, box.getCenter().y, box.getCenter().z);
     }
 
     @Override

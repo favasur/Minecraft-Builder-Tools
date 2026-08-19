@@ -4,6 +4,7 @@ import net.buildertools.BuilderToolsMod;
 import net.buildertools.network.packet.EntityDeletePacket;
 import net.buildertools.network.packet.EntityDuplicatePacket;
 import net.buildertools.network.packet.EntityFreezePacket;
+import net.buildertools.network.packet.EntitySpawnPacket;
 import net.buildertools.network.packet.EntityTransformPacket;
 import net.buildertools.network.packet.OffGridBlockPacket;
 import net.buildertools.network.packet.PaintPacket;
@@ -42,6 +43,7 @@ public final class ModPackets {
                 flow.add(SelectionCopyPacket.class, SelectionCopyPacket.STREAM_CODEC.cast(), SelectionCopyPacket::handle);
                 flow.add(PastePacket.class, PastePacket.STREAM_CODEC.cast(), PastePacket::handle);
                 flow.add(EntityTransformPacket.class, EntityTransformPacket.STREAM_CODEC.cast(), EntityTransformPacket::handle);
+                flow.add(EntitySpawnPacket.class, EntitySpawnPacket.STREAM_CODEC.cast(), EntitySpawnPacket::handle);
                 flow.add(OffGridBlockPacket.class, OffGridBlockPacket.STREAM_CODEC.cast(), OffGridBlockPacket::handle);
                 flow.add(EntityDeletePacket.class, EntityDeletePacket.STREAM_CODEC.cast(), EntityDeletePacket::handle);
                 flow.add(EntityDuplicatePacket.class, EntityDuplicatePacket.STREAM_CODEC.cast(), EntityDuplicatePacket::handle);

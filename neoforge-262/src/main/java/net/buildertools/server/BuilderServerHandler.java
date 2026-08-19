@@ -4,12 +4,14 @@ import net.buildertools.network.packet.SelectionSyncPacket;
 import net.buildertools.registry.ModSounds;
 import net.minecraft.commands.arguments.blocks.BlockStateParser;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Registry;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
@@ -594,25 +596,80 @@ public final class BuilderServerHandler {
     // Entity operations
     // ------------------------------------------------------------------
 
+    /**
+     * Moves (and optionally re-rotates) an entity. This is called continuously while dragging or
+     * rotating, so it must not send chat messages or play sounds - the client plays the feedback
+     * for discrete actions itself. Off-grid blocks get special handling so their linked display
+     * (the thing that actually renders the rotated model) follows both position and rotation,
+     * keeping the visual in sync with the hitbox.
+     */
     public static void moveEntity(ServerPlayer player, int entityId,
                                   double x, double y, double z, float yaw, float pitch, boolean headOnly) {
         Entity entity = validateEntity(player, entityId);
         if (entity == null) {
             return;
         }
+        if (entity instanceof OffGridBlockEntity offGrid) {
+            // Snap the solid block into the cell and rotate it in place; the display child moves
+            // to the new cell corner and takes the new rotation so visuals match the hitbox.
+            BlockPos cell = BlockPos.containing(x, y, z);
+            offGrid.setPos(cell.getX() + 0.5, cell.getY(), cell.getZ() + 0.5);
+            offGrid.setPlacementRotation(yaw, pitch);
+            offGrid.setYRot(yaw);
+            offGrid.setXRot(pitch);
+            offGrid.setYHeadRot(yaw);
+            UUID displayUuid = offGrid.getDisplayUuid();
+            if (displayUuid != null) {
+                Entity display = player.level().getEntity(displayUuid);
+                if (display instanceof Display.BlockDisplay blockDisplay) {
+                    blockDisplay.setPos(cell.getX(), cell.getY(), cell.getZ());
+                    ((DisplayAccessor) (Object) blockDisplay)
+                            .buildertools$setTransformation(OffGridTransform.transformation(yaw, pitch));
+                }
+            }
+            offGrid.setDeltaMovement(Vec3.ZERO);
+            return;
+        }
         entity.teleportTo(x, y, z);
         if (headOnly) {
             // Hytale Alt+R "rotate head": only the head yaw changes, the body stays put.
             entity.setYHeadRot(yaw);
-            sendMessage(player, "Rotated entity's head.");
         } else {
             entity.setYRot(yaw);
             entity.setXRot(pitch);
             entity.setYHeadRot(yaw);
-            sendMessage(player, "Moved entity.");
         }
         entity.setDeltaMovement(Vec3.ZERO);
-        playSound(player, ModSounds.ENTITY_MOVE.get());
+    }
+
+    /** Spawns an entity of the given type at the position (used by the Entity Tool's E interface). */
+    public static void spawnEntity(ServerPlayer player, Identifier typeId, double x, double y, double z) {
+        if (player.distanceToSqr(x, y, z) > MAX_DISTANCE * MAX_DISTANCE) {
+            sendError(player, "Position is too far away.");
+            return;
+        }
+        Registry<EntityType<?>> registry = player.level().registryAccess().lookupOrThrow(Registries.ENTITY_TYPE);
+        EntityType<?> type = registry.getValue(typeId);
+        if (type == null || type == EntityTypes.PLAYER) {
+            sendError(player, "Unknown entity type.");
+            return;
+        }
+        ServerLevel level = player.level();
+        BlockPos pos = BlockPos.containing(x, y, z);
+        if (!level.hasChunkAt(pos)) {
+            sendError(player, "Area is not loaded.");
+            return;
+        }
+        Entity entity = type.spawn(level, pos, EntitySpawnReason.COMMAND);
+        if (entity == null) {
+            sendError(player, "Could not spawn entity.");
+            return;
+        }
+        entity.setPos(x, y, z);
+        entity.setYRot(player.getYRot());
+        entity.setXRot(0.0f);
+        sendMessage(player, "Spawned " + EntityType.getKey(type).getPath() + ".");
+        playSound(player, ModSounds.ENTITY_DUPLICATE.get());
     }
 
     public static void deleteEntity(ServerPlayer player, int entityId) {

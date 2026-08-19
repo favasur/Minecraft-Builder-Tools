@@ -3,6 +3,7 @@ package net.buildertools.network;
 import net.buildertools.network.packet.EntityDeletePacket;
 import net.buildertools.network.packet.EntityDuplicatePacket;
 import net.buildertools.network.packet.EntityFreezePacket;
+import net.buildertools.network.packet.EntitySpawnPacket;
 import net.buildertools.network.packet.EntityTransformPacket;
 import net.buildertools.network.packet.OffGridBlockPacket;
 import net.buildertools.network.packet.PaintPacket;
@@ -31,6 +32,7 @@ public final class ModPackets {
         PayloadTypeRegistry.serverboundPlay().register(SelectionCopyPacket.TYPE, SelectionCopyPacket.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(PastePacket.TYPE, PastePacket.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(EntityTransformPacket.TYPE, EntityTransformPacket.STREAM_CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(EntitySpawnPacket.TYPE, EntitySpawnPacket.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(OffGridBlockPacket.TYPE, OffGridBlockPacket.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(EntityDeletePacket.TYPE, EntityDeletePacket.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(EntityDuplicatePacket.TYPE, EntityDuplicatePacket.STREAM_CODEC);

@@ -4,6 +4,7 @@ import net.buildertools.BuilderToolsMod;
 import net.buildertools.network.packet.EntityDeletePacket;
 import net.buildertools.network.packet.EntityDuplicatePacket;
 import net.buildertools.network.packet.EntityFreezePacket;
+import net.buildertools.network.packet.EntitySpawnPacket;
 import net.buildertools.network.packet.EntityTransformPacket;
 import net.buildertools.network.packet.OffGridBlockPacket;
 import net.buildertools.network.packet.PlayerAbilitiesPacket;
@@ -28,6 +29,7 @@ public class ModPackets {
         registrar.playToServer(SelectionCopyPacket.TYPE, SelectionCopyPacket.STREAM_CODEC, SelectionCopyPacket::handle);
         registrar.playToServer(PastePacket.TYPE, PastePacket.STREAM_CODEC, PastePacket::handle);
         registrar.playToServer(EntityTransformPacket.TYPE, EntityTransformPacket.STREAM_CODEC, EntityTransformPacket::handle);
+        registrar.playToServer(EntitySpawnPacket.TYPE, EntitySpawnPacket.STREAM_CODEC, EntitySpawnPacket::handle);
         registrar.playToServer(EntityDeletePacket.TYPE, EntityDeletePacket.STREAM_CODEC, EntityDeletePacket::handle);
         registrar.playToServer(EntityDuplicatePacket.TYPE, EntityDuplicatePacket.STREAM_CODEC, EntityDuplicatePacket::handle);
         registrar.playToServer(PaintPacket.TYPE, PaintPacket.STREAM_CODEC, PaintPacket::handle);
