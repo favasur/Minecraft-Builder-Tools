@@ -121,6 +121,13 @@ public class OffGridBlockEntity extends Entity {
         return true;
     }
 
+    /** Middle-click (pick block) gives the represented block back, like any normal block. */
+    @Override
+    public ItemStack getPickResult() {
+        BlockState state = getRepresentedState();
+        return state.isAir() ? null : new ItemStack(state.getBlock());
+    }
+
     @Override
     public boolean isPushable() {
         return false;

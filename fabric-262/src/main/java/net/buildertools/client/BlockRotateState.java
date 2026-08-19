@@ -1,17 +1,19 @@
 package net.buildertools.client;
 
+import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import org.lwjgl.glfw.GLFW;
 
 /**
  * Off-grid placement preview (Hytale-style offset placement): press R while holding a block to
- * enter the mode - the block about to be placed rotates around its cell following the cursor,
- * just like the Entity Tool's rotate mode. Horizontal mouse movement spins the yaw, vertical
- * movement tilts the pitch. Press R again to cancel, right-click or Enter to place the block at
+ * enter the mode, then hold the left mouse button and move the mouse to rotate the block around
+ * its cell - horizontal movement spins the yaw, vertical movement tilts the pitch, releasing the
+ * button freezes the angle. Press R again to cancel, right-click or Enter to place the block at
  * the current rotation. Aiming at an already-placed off-grid block and pressing R re-enters the
  * editor for that block so it can be re-rotated in place.
  */
@@ -113,16 +115,29 @@ public final class BlockRotateState {
 
         double angle = Math.atan2(hit.z - center.z, hit.x - center.x);
         double d = angle - lastAngle;
-        // Wrap the step so crossing +/-180 deg never snaps the block around.
-        yaw += (float) Math.toDegrees(Math.atan2(Math.sin(d), Math.cos(d)));
-        lastAngle = angle;
-
         double dx = hit.x - center.x;
         double dz = hit.z - center.z;
         double pitchAngle = Math.atan2(hit.y - center.y, Math.sqrt(dx * dx + dz * dz));
         double dp = pitchAngle - lastPitch;
-        pitch += (float) Math.toDegrees(Math.atan2(Math.sin(dp), Math.cos(dp)));
+        if (isLeftMouseDown()) {
+            // Rotate only while the left mouse button is held (drag to rotate, like Hytale). The
+            // baselines refresh every tick, so releasing and re-pressing never causes a jump.
+            // Wrap the step so crossing +/-180 deg never snaps the block around.
+            yaw += (float) Math.toDegrees(Math.atan2(Math.sin(d), Math.cos(d)));
+            pitch += (float) Math.toDegrees(Math.atan2(Math.sin(dp), Math.cos(dp)));
+        }
+        lastAngle = angle;
         lastPitch = pitchAngle;
+    }
+
+    /** The real left-button state, since the vanilla key mapping is bypassed while previewing. */
+    private static boolean isLeftMouseDown() {
+        Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.getWindow() == null) {
+            return false;
+        }
+        return GLFW.glfwGetMouseButton(
+                minecraft.getWindow().handle(), GLFW.GLFW_MOUSE_BUTTON_LEFT) == GLFW.GLFW_PRESS;
     }
 
     /** The cell a newly placed block would occupy (from the player's pick), or null. */

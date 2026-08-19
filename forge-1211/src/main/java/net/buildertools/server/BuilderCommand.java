@@ -6,6 +6,8 @@ import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.ArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
+import net.buildertools.entity.OffGridBlockEntity;
+import net.buildertools.entity.OffGridBlockEntity;
 import net.buildertools.network.packet.SelectionSyncPacket;
 import net.buildertools.registry.ModItems;
 import net.minecraft.commands.CommandBuildContext;
@@ -22,6 +24,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.event.RegisterCommandsEvent;
 
@@ -35,7 +39,7 @@ import java.util.function.BiPredicate;
  * Tool. The selection is kept server-side (synced by the client) so all of these work in single
  * player and on servers:
  * {@code set, replace, walls, outline, hollow, faces, overlay, center, copy, cut, paste, move,
- * stack, expand, contract, shift, undo, redo, pos1, pos2, sel, wand}.
+ * stack, expand, contract, shift, undo, redo, clear, clearinventory, pos1, pos2, sel, wand}.
  */
 public final class BuilderCommand {
     private static final int MAX_BLOCKS = BuilderServerHandler.MAX_BLOCKS;
@@ -102,6 +106,8 @@ public final class BuilderCommand {
                                         IntegerArgumentType.getInteger(ctx, "amount"))))));
         dispatcher.register(Commands.literal("undo").executes(ctx -> undo(ctx)));
         dispatcher.register(Commands.literal("redo").executes(ctx -> redo(ctx)));
+        dispatcher.register(Commands.literal("clear").executes(ctx -> clearSelection(ctx)));
+        dispatcher.register(Commands.literal("clearinventory").executes(ctx -> clearInventory(ctx)));
     }
 
     // ------------------------------------------------------------------
@@ -304,6 +310,37 @@ public final class BuilderCommand {
         BlockState state = blockState(ctx, blockName);
         int count = applyRegion(player, r, (level, pos) -> true, state, null);
         message(player, "Set " + count + " block(s).");
+        return 1;
+    }
+
+    /** /clear - wipes every block in the selected area (and any off-grid blocks in it). */
+    private static int clearSelection(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        ServerPlayer player = player(ctx);
+        SelectionStore.Region r = region(player);
+        if (!validRegion(player, r)) {
+            return 0;
+        }
+        Level level = player.level();
+        int count = applyRegion(player, r, (level2, pos) -> !level2.getBlockState(pos).isAir(),
+                Blocks.AIR.defaultBlockState(), null);
+        // Off-grid blocks are solid entities, not block states - remove them too so the wipe is
+        // complete.
+        for (OffGridBlockEntity block : level.getEntitiesOfClass(OffGridBlockEntity.class,
+                new AABB(r.min().getX(), r.min().getY(), r.min().getZ(),
+                        r.max().getX() + 1, r.max().getY() + 1, r.max().getZ() + 1))) {
+            if (block.getTags().contains(BuilderServerHandler.OFF_GRID_TAG)) {
+                block.discardWithDisplay();
+            }
+        }
+        message(player, "Cleared " + count + " block(s) from the selection.");
+        return 1;
+    }
+
+    /** /clearinventory - the vanilla /clear behavior (empties the player's inventory). */
+    private static int clearInventory(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        ServerPlayer player = player(ctx);
+        player.getInventory().clearContent();
+        message(player, "Cleared your inventory.");
         return 1;
     }
 

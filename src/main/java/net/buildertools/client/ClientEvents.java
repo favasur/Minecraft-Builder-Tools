@@ -330,7 +330,7 @@ public final class ClientEvents {
             }
         } else if (item instanceof BlockItem && event.getButton() == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             if (BlockRotateState.isActive()) {
-                // Left click cancels the placement preview instead of breaking.
+                // Left click is reserved for hold-to-rotate; suppress the vanilla attack.
                 event.setCanceled(true);
             } else {
                 // Break an off-grid block: raycast the display entities and remove the one hit.
@@ -340,6 +340,21 @@ public final class ClientEvents {
                     ClientPackets.sendToServer(new OffGridBlockPacket(
                             cell.getX(), cell.getY(), cell.getZ(), 0.0f, 0.0f, true));
                     player.playSound(ModSounds.SET_CORNER_2.get(), 1.0f, 1.0f);
+                }
+            }
+        } else if (item instanceof BlockItem && event.getButton() == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
+            // Right-clicking a placed off-grid block places the next block beside it (on the
+            // clicked face) with the same rotation, so a rotated formation can be built by
+            // clicking block after block - no R needed for every piece.
+            if (!BlockRotateState.isActive()) {
+                OffGridHit hit = raycastOffGridHit(player, 6.0);
+                if (hit != null) {
+                    event.setCanceled(true);
+                    BlockPos cell = hit.block.cell().relative(hit.face);
+                    ClientPackets.sendToServer(new OffGridBlockPacket(
+                            cell.getX(), cell.getY(), cell.getZ(),
+                            hit.block.getPlacementYaw(), hit.block.getPlacementPitch(), false));
+                    player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
                 }
             }
         }
@@ -480,7 +495,7 @@ public final class ClientEvents {
         String[] lines = legendFor(player.getMainHandItem().getItem());
         if (BlockRotateState.isActive()) {
             lines = new String[]{
-                    "Off-grid: move mouse to rotate H/V · RMB or Enter to place · R cancels/re-rotate"};
+                    "Off-grid: hold LMB + move mouse to rotate · RMB or Enter places · R cancels"};
         }
         if (lines == null) {
             return;
@@ -759,6 +774,15 @@ public final class ClientEvents {
      * the nearest hit (or null). Used to break/re-rotate a block by looking at it.
      */
     private static BlockPos raycastOffGrid(Player player, double reach) {
+        OffGridHit hit = raycastOffGridHit(player, reach);
+        return hit != null ? hit.block.cell() : null;
+    }
+
+    /** The solid off-grid block under the cursor and the face of its cell that was clicked. */
+    private record OffGridHit(OffGridBlockEntity block, Direction face) {
+    }
+
+    private static OffGridHit raycastOffGridHit(Player player, double reach) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null) {
             return null;
@@ -767,7 +791,7 @@ public final class ClientEvents {
         Vec3 dir = player.getLookAngle();
         Vec3 end = eye.add(dir.scale(reach));
         double best = Double.MAX_VALUE;
-        BlockPos bestCell = null;
+        OffGridHit bestHit = null;
         for (OffGridBlockEntity block : minecraft.level.getEntitiesOfClass(OffGridBlockEntity.class,
                 player.getBoundingBox().expandTowards(dir.scale(reach)).inflate(1.5))) {
             if (!block.getTags().contains(net.buildertools.server.BuilderServerHandler.OFF_GRID_TAG)) {
@@ -778,11 +802,31 @@ public final class ClientEvents {
                 double dist = eye.distanceToSqr(hit.get());
                 if (dist < best) {
                     best = dist;
-                    bestCell = block.cell();
+                    bestHit = new OffGridHit(block, hitFace(block.getBoundingBox(), hit.get()));
                 }
             }
         }
-        return bestCell;
+        return bestHit;
+    }
+
+    /**
+     * The face of the AABB the hit point lies on: the axis with the largest offset from the box
+     * center is the surface normal. Works for any AABB (full blocks, slabs, ...).
+     */
+    private static Direction hitFace(AABB box, Vec3 hit) {
+        double dx = hit.x - box.getCenter().x;
+        double dy = hit.y - box.getCenter().y;
+        double dz = hit.z - box.getCenter().z;
+        double ax = Math.abs(dx);
+        double ay = Math.abs(dy);
+        double az = Math.abs(dz);
+        if (ax >= ay && ax >= az) {
+            return dx > 0 ? Direction.EAST : Direction.WEST;
+        }
+        if (ay >= az) {
+            return dy > 0 ? Direction.UP : Direction.DOWN;
+        }
+        return dz > 0 ? Direction.SOUTH : Direction.NORTH;
     }
 
     private static BlockPos getPasteAnchor(Minecraft minecraft) {
