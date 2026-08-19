@@ -6,6 +6,7 @@
   "mixins": [
     "PlayerMixin",
     "MouseHandlerMixin",
+    "ItemRendererMixin",
     "DisplayAccessor",
     "BlockDisplayAccessor"
   ],

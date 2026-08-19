@@ -24,6 +24,8 @@ gradle-local.properties
 
 # Dev scratch / reverse-engineering tools and stray artifacts
 .tools/
-net/
+/net/
 client-log.txt
+client-launch.log
+icon.png
 .freebuff/

@@ -1,0 +1,19 @@
+{
+  "model": {
+    "type": "minecraft:select",
+    "property": "minecraft:display_context",
+    "cases": [
+      {
+        "when": ["gui", "ground", "fixed", "head"],
+        "model": {
+          "type": "minecraft:model",
+          "model": "buildertools:item/paint_tool"
+        }
+      }
+    ],
+    "fallback": {
+      "type": "minecraft:model",
+      "model": "buildertools:item/brush_hold"
+    }
+  }
+}
