@@ -144,8 +144,10 @@ public final class ClientEvents {
                 return InteractionResult.FAIL;
             } else if (item instanceof BlockItem) {
                 // Off-grid placement. With R pressed the block is placed at the preview cell with the
-                // adjusted rotation; otherwise, if the new block's cell touches an off-grid block, the
-                // rotation is inherited so a rotated formation can be built block by block.
+                // adjusted rotation; otherwise, clicking ON an off-grid block places a new block into
+                // the cell next to it (inheriting its rotation), and clicking a normal block whose
+                // target cell touches an off-grid block inherits the rotation too, so a rotated
+                // formation can be built block by block.
                 if (level.isClientSide()) {
                     if (BlockRotateState.isActive()) {
                         BlockPos cell = BlockRotateState.getTarget();
@@ -157,13 +159,33 @@ public final class ClientEvents {
                         BlockRotateState.stop();
                         player.playSound(ModSounds.SET_CORNER_1, 1.0f, 1.0f);
                     } else {
-                        BlockPos cell = hitResult.getBlockPos().relative(hitResult.getDirection());
-                        float[] inherited = findInheritedRotation(player, cell);
-                        if (inherited != null) {
-                            ClientPackets.sendToServer(new OffGridBlockPacket(
-                                    cell.getX(), cell.getY(), cell.getZ(), inherited[0], inherited[1], false));
-                            player.playSound(ModSounds.SET_CORNER_1, 1.0f, 1.0f);
-                            return InteractionResult.FAIL;
+                        // 1) Aiming at an off-grid block (its cell is air, so the vanilla block
+                        // raycast would pass through it and hit the block behind): place into the
+                        // ADJACENT cell, inheriting the rotation. Only when the entity is closer
+                        // than the vanilla block hit, so clicking a real wall in front of an
+                        // off-grid block still behaves normally.
+                        OffGridHit ogHit = raycastOffGridHit(player, 6.0);
+                        if (ogHit != null && ogHit.distSq < eyeDistSq(player, hitResult.getLocation())) {
+                            BlockPos cell = ogHit.block.cell().relative(ogHit.face);
+                            if (findOffGridEntity(player.level(), cell) == null
+                                    && player.level().getBlockState(cell).canBeReplaced()) {
+                                ClientPackets.sendToServer(new OffGridBlockPacket(
+                                        cell.getX(), cell.getY(), cell.getZ(),
+                                        ogHit.block.getPlacementYaw(), ogHit.block.getPlacementPitch(), false));
+                                player.playSound(ModSounds.SET_CORNER_1, 1.0f, 1.0f);
+                                return InteractionResult.FAIL;
+                            }
+                        } else {
+                            // 2) Normal block click: inherit the rotation from an off-grid NEIGHBOR
+                            // only (never the target cell itself, which would re-plant it).
+                            BlockPos cell = hitResult.getBlockPos().relative(hitResult.getDirection());
+                            float[] inherited = findInheritedRotation(player, cell);
+                            if (inherited != null) {
+                                ClientPackets.sendToServer(new OffGridBlockPacket(
+                                        cell.getX(), cell.getY(), cell.getZ(), inherited[0], inherited[1], false));
+                                player.playSound(ModSounds.SET_CORNER_1, 1.0f, 1.0f);
+                                return InteractionResult.FAIL;
+                            }
                         }
                     }
                 }
@@ -184,6 +206,23 @@ public final class ClientEvents {
                     } else {
                         SelectionManager.setSelectedEntity(target);
                         player.playSound(ModSounds.ENTITY_SELECT, 1.0f, 1.0f);
+                    }
+                }
+                return InteractionResult.FAIL;
+            } else if (item instanceof BlockItem && target instanceof OffGridBlockEntity ogBlock) {
+                // Right-clicking an off-grid block directly (entity hit, not a block hit): place a
+                // new block into the adjacent cell, inheriting its rotation, like the block-hit path.
+                if (level.isClientSide()) {
+                    OffGridHit ogHit = raycastOffGridHit(player, 6.0);
+                    BlockPos cell = ogHit != null
+                            ? ogHit.block.cell().relative(ogHit.face)
+                            : ogBlock.cell().relative(faceFromLook(player, ogBlock));
+                    if (findOffGridEntity(player.level(), cell) == null
+                            && player.level().getBlockState(cell).canBeReplaced()) {
+                        ClientPackets.sendToServer(new OffGridBlockPacket(
+                                cell.getX(), cell.getY(), cell.getZ(),
+                                ogBlock.getPlacementYaw(), ogBlock.getPlacementPitch(), false));
+                        player.playSound(ModSounds.SET_CORNER_1, 1.0f, 1.0f);
                     }
                 }
                 return InteractionResult.FAIL;
@@ -745,12 +784,13 @@ public final class ClientEvents {
     }
 
     /**
-     * Finds the rotation inherited from an off-grid block adjacent to (or at) the given cell.
-     * Returns NaN when there is no off-grid neighbor, so normal grid placement proceeds.
+     * Finds the rotation inherited from an off-grid block ADJACENT to the given cell (never the
+     * cell itself - that would re-plant the block already occupying it). Returns null when there
+     * is no off-grid neighbor, so normal grid placement proceeds.
      */
     private static float[] findInheritedRotation(Player player, BlockPos cell) {
         List<BlockPos> cells = List.of(
-                cell, cell.above(), cell.below(), cell.north(), cell.south(), cell.east(), cell.west());
+                cell.above(), cell.below(), cell.north(), cell.south(), cell.east(), cell.west());
         for (BlockPos neighbor : cells) {
             OffGridBlockEntity block = findOffGridEntity(player.level(), neighbor);
             if (block != null) {
@@ -778,8 +818,8 @@ public final class ClientEvents {
         return hit != null ? hit.block.cell() : null;
     }
 
-    /** The solid off-grid block under the cursor and the face of its cell that was clicked. */
-    private record OffGridHit(OffGridBlockEntity block, Direction face) {
+    /** The solid off-grid block under the cursor, the face hit, and the squared distance. */
+    private record OffGridHit(OffGridBlockEntity block, Direction face, double distSq) {
     }
 
     private static OffGridHit raycastOffGridHit(Player player, double reach) {
@@ -799,11 +839,28 @@ public final class ClientEvents {
                 double dist = eye.distanceToSqr(hit.get());
                 if (dist < best) {
                     best = dist;
-                    bestHit = new OffGridHit(block, hitFace(block.getBoundingBox(), hit.get()));
+                    bestHit = new OffGridHit(block, hitFace(block.getBoundingBox(), hit.get()), dist);
                 }
             }
         }
         return bestHit;
+    }
+
+    private static double eyeDistSq(Player player, Vec3 point) {
+        return player.getEyePosition(1.0f).distanceToSqr(point);
+    }
+
+    /** The general direction from the player's eye to the block center (used for entity hits). */
+    private static Direction faceFromLook(Player player, OffGridBlockEntity block) {
+        Vec3 delta = block.getBoundingBox().getCenter().subtract(player.getEyePosition(1.0f));
+        double ax = Math.abs(delta.x), ay = Math.abs(delta.y), az = Math.abs(delta.z);
+        if (ax >= ay && ax >= az) {
+            return delta.x > 0 ? Direction.EAST : Direction.WEST;
+        }
+        if (ay >= az) {
+            return delta.y > 0 ? Direction.UP : Direction.DOWN;
+        }
+        return delta.z > 0 ? Direction.SOUTH : Direction.NORTH;
     }
 
     /**

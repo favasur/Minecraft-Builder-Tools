@@ -98,8 +98,12 @@ public class OffGridBlockEntity extends Entity {
         // collision box and re-measure it, so the hitbox always matches what the player sees.
         if (DATA_BLOCK_STATE.equals(key) || DATA_YAW.equals(key) || DATA_PITCH.equals(key)) {
             if (this.level() != null) {
-                Vec3 center = visualCenter();
-                this.setPos(center.x, center.y, center.z);
+                // getBoundingBox() is final and is built by makeBoundingBox(), which is bottom-
+                // anchored in Y and centered in X/Z on the entity position. So the entity must sit
+                // at the BOTTOM-CENTER of the visual box (not its center) or the collision box
+                // floats up by half its height and never matches the rotated model.
+                Vec3 anchor = visualAnchor();
+                this.setPos(anchor.x, anchor.y, anchor.z);
                 this.refreshDimensions();
             }
         }
@@ -126,7 +130,9 @@ public class OffGridBlockEntity extends Entity {
      */
     public AABB visualCollisionBox() {
         BlockState state = getRepresentedState();
-        AABB shape = state.getCollisionShape(this.level(), BlockPos.ZERO).bounds();
+        AABB shape = this.level() != null
+                ? state.getCollisionShape(this.level(), BlockPos.ZERO).bounds()
+                : new AABB(0, 0, 0, 1, 1, 1);
         float yaw = getPlacementYaw();
         float pitch = getPlacementPitch();
         if (yaw == 0.0f && pitch == 0.0f) {
@@ -155,10 +161,13 @@ public class OffGridBlockEntity extends Entity {
                 c.getX() + maxX, c.getY() + maxY, c.getZ() + maxZ);
     }
 
-    /** The world position the entity must sit at so its bounding box equals the visual box. */
-    public Vec3 visualCenter() {
+    /**
+     * The world position the entity must sit at so makeBoundingBox() equals the visual box:
+     * the bottom-center of the visual footprint (X/Z centered on the box, Y at its base).
+     */
+    public Vec3 visualAnchor() {
         AABB box = visualCollisionBox();
-        return new Vec3(box.getCenter().x, box.getCenter().y, box.getCenter().z);
+        return new Vec3(box.getCenter().x, box.minY, box.getCenter().z);
     }
 
     @Override
