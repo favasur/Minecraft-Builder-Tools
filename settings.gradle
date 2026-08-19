@@ -1,0 +1,18 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven { url = 'https://maven.neoforged.net/releases' }
+        maven { url = 'https://maven.fabricmc.net' }
+        maven { url = 'https://maven.minecraftforge.net' }
+    }
+}
+
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
+rootProject.name = 'builder-tools'
+
+// The root project is the NeoForge 1.21.1 build. Every loader/version combination is its own
+// standalone project (no subprojects): forge-1211, fabric-1211, neoforge-262, forge-262,
+// fabric-262 - each builds independently with its own Gradle wrapper.

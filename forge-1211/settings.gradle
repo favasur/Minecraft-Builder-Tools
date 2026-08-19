@@ -1,0 +1,11 @@
+// Standalone Forge 1.21.1 build. ForgeGradle 6 does not support Gradle 9,
+// so this project has its own Gradle 8 wrapper and its own settings file.
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven { url = 'https://maven.minecraftforge.net' }
+        maven { url = 'https://maven.neoforged.net/releases' }
+    }
+}
+
+rootProject.name = 'builder-tools-forge-1211'

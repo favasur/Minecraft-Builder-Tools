@@ -1,0 +1,6 @@
+tasks.register('printCp') {
+    doLast {
+        def cp = sourceSets.main.compileClasspath.files
+        cp.each { println it.absolutePath }
+    }
+}

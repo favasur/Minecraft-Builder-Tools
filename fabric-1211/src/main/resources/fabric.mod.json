@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "id": "buildertools",
+  "version": "${version}",
+  "name": "Builder Tools",
+  "description": "WorldEdit-style builder tools for Minecraft: selection, entity, ruler, laser, paint, scatter and smooth tools with in-world visuals, a creative settings panel and a full command set.",
+  "authors": [
+    "Builder Tools contributors"
+  ],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "net.buildertools.BuilderToolsMod"
+    ],
+    "client": [
+      "net.buildertools.BuilderToolsModClient"
+    ]
+  },
+  "mixins": [
+    "buildertools.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.21.1",
+    "java": ">=21",
+    "fabric-api": "*"
+  }
+}

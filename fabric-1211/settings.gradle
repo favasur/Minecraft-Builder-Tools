@@ -1,0 +1,9 @@
+// Standalone Fabric 1.21.1 build - equal peer of the other loader/version modules.
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven { url = 'https://maven.fabricmc.net' }
+    }
+}
+
+rootProject.name = 'builder-tools-fabric-1211'

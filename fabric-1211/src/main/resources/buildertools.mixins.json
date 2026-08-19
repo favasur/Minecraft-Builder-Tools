@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "net.buildertools.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "PlayerMixin",
+    "MouseHandlerMixin",
+    "DisplayAccessor",
+    "BlockDisplayAccessor"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

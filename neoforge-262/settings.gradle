@@ -1,0 +1,10 @@
+// Standalone NeoForge 26.2 build - equal peer of the other loader/version modules.
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven { url = 'https://maven.neoforged.net/releases' }
+        maven { url = 'https://maven.minecraftforge.net' }
+    }
+}
+
+rootProject.name = 'builder-tools-neoforge-262'

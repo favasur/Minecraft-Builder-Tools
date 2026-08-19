@@ -1,0 +1,35 @@
+modLoader="javafml"
+loaderVersion="${loader_version_range}"
+license="${mod_license}"
+
+[[mods]]
+modId="${mod_id}"
+version="${mod_version}"
+displayName="${mod_name}"
+authors="Builder Tools contributors"
+description='''
+WorldEdit-style builder tools for Minecraft (NeoForge 26.2).
+
+Includes:
+- Selection Tool: mark two corners with left/right click, see the region rendered in-world, then copy / paste / fill / undo.
+- Entity Tool: right-click an entity to select it, then move (scroll), nudge up/down (sneak+scroll), rotate, teleport to a block, duplicate or delete it.
+
+All operations are server-validated and work in single player and multiplayer.
+'''
+
+[[mixins]]
+config="buildertools.mixins.json"
+
+[[dependencies.${mod_id}]]
+modId="neoforge"
+type="required"
+versionRange="[${neo_version},)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.${mod_id}]]
+modId="minecraft"
+type="required"
+versionRange="${minecraft_version_range}"
+ordering="NONE"
+side="BOTH"
