@@ -23,6 +23,7 @@ runs {
 
     client {
         systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        programArguments.addAll('--quickPlaySingleplayer', 'BT Smoke Test')
     }
 
     server {
@@ -41,6 +42,8 @@ configurations {
 
 dependencies {
     implementation "net.neoforged:neoforge:${neo_version}"
+    // Bundled Smooth Terrain meshing (NoCubes-style Surface Nets) needs these at compile+runtime.
+    implementation 'io.github.llamalad7:mixinextras-neoforge:0.3.5'
 }
 
 // Expand ${...} placeholders in the mods.toml at build time.

@@ -27,6 +27,7 @@ public final class KeyBindings {
     public static final KeyMapping FREEZE = register(new KeyMapping("key.buildertools.freeze", InputConstants.Type.KEYSYM, InputConstants.KEY_G, CATEGORY));
     public static final KeyMapping ROTATE = register(new KeyMapping("key.buildertools.rotate", InputConstants.Type.KEYSYM, InputConstants.KEY_R, CATEGORY));
     public static final KeyMapping CONFIRM = register(new KeyMapping("key.buildertools.confirm", InputConstants.Type.KEYSYM, InputConstants.KEY_RETURN, CATEGORY));
+    public static final KeyMapping BILLBOARD = register(new KeyMapping("key.buildertools.billboard", InputConstants.Type.KEYSYM, InputConstants.KEY_B, CATEGORY));
 
     private KeyBindings() {
     }

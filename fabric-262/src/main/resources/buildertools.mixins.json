@@ -5,7 +5,8 @@
   "compatibilityLevel": "JAVA_25",
   "mixins": [
     "MouseHandlerMixin",
-    "PlayerMixin"
+    "PlayerMixin",
+    "LocalPlayerMixin",
     "DisplayAccessor",
     "BlockDisplayAccessor",
   ],

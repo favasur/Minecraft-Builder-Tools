@@ -4,7 +4,8 @@
   "package": "net.buildertools.mixin",
   "compatibilityLevel": "JAVA_25",
   "mixins": [
-    "PlayerMixin"
+    "PlayerMixin",
+    "LocalPlayerMixin",
     "DisplayAccessor",
     "BlockDisplayAccessor",
   ],

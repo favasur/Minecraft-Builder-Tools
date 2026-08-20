@@ -16,6 +16,7 @@
   "key.buildertools.freeze": "Freeze / Unfreeze Selected Entity",
   "key.buildertools.rotate": "Rotate Selected Entity (mode)",
   "key.buildertools.confirm": "Confirm Off-Grid Placement",
+  "key.buildertools.billboard": "Toggle Billboard (Face Player)",
   "subtitles.buildertools.selection.set_corner1": "Selection corner marked",
   "subtitles.buildertools.selection.set_corner2": "Selection region placed",
   "subtitles.buildertools.selection.clear": "Selection cleared",

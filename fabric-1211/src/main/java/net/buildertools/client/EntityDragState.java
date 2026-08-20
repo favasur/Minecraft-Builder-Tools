@@ -1,6 +1,7 @@
 package net.buildertools.client;
 
 import net.buildertools.client.settings.BuilderSettings;
+import net.buildertools.entity.OffGridBlockEntity;
 import net.buildertools.network.packet.EntityTransformPacket;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
@@ -27,7 +28,9 @@ public final class EntityDragState {
 
     public static void start(Entity target) {
         entity = target;
-        planeY = target.getY();
+        // Off-grid blocks move from their MODEL center (the point the server stores and the
+        // visual/collision derive from); regular entities use their position.
+        planeY = target instanceof OffGridBlockEntity og ? og.modelCenter().y : target.getY();
         lastSent = null;
     }
 
@@ -53,7 +56,8 @@ public final class EntityDragState {
 
         double x = target.x;
         double z = target.z;
-        double y = entity.getY();
+        // Off-grid blocks drag by their model center; regular entities by their position.
+        double y = entity instanceof OffGridBlockEntity og ? og.modelCenter().y : entity.getY();
 
         if (BuilderSettings.isGridSnap()) {
             double s = BuilderSettings.getGridSize();

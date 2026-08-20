@@ -17,6 +17,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Display;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -37,7 +39,8 @@ import java.util.function.BiPredicate;
  * Tool. The selection is kept server-side (synced by the client) so all of these work in single
  * player and on servers:
  * {@code set, replace, walls, outline, hollow, faces, overlay, center, copy, cut, paste, move,
- * stack, expand, contract, shift, undo, redo, clear, clearinventory, pos1, pos2, sel, wand}.
+ * stack, expand, contract, shift, undo, redo, clear, clearinventory, clearentities, pos1, pos2,
+ * sel, wand}.
  */
 public final class BuilderCommand {
     private static final int MAX_BLOCKS = BuilderServerHandler.MAX_BLOCKS;
@@ -106,6 +109,10 @@ public final class BuilderCommand {
         dispatcher.register(Commands.literal("redo").executes(ctx -> redo(ctx)));
         dispatcher.register(Commands.literal("clear").executes(ctx -> clearSelection(ctx)));
         dispatcher.register(Commands.literal("clearinventory").executes(ctx -> clearInventory(ctx)));
+        dispatcher.register(Commands.literal("clearentities")
+                .executes(ctx -> clearEntities(ctx, -1))
+                .then(Commands.argument("radius", IntegerArgumentType.integer(1))
+                        .executes(ctx -> clearEntities(ctx, IntegerArgumentType.getInteger(ctx, "radius")))));
     }
 
     // ------------------------------------------------------------------
@@ -330,7 +337,20 @@ public final class BuilderCommand {
                 block.discardWithDisplay();
             }
         }
-        message(player, "Cleared " + count + " block(s) from the selection.");
+        // Rotated blocks of the mod's layer in the selection are wiped too.
+        int freeCount = 0;
+        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            for (net.minecraft.core.BlockPos pos : net.minecraft.core.BlockPos.betweenClosed(
+                    r.min().getX(), r.min().getY(), r.min().getZ(),
+                    r.max().getX(), r.max().getY(), r.max().getZ())) {
+                if (RotationStore.hasRotation(serverLevel, pos)) {
+                    RotationStore.remove(serverLevel, pos.immutable());
+                    freeCount++;
+                }
+            }
+        }
+        message(player, "Cleared " + count + " block(s) from the selection"
+                + (freeCount > 0 ? " + " + freeCount + " rotated block(s)" : "") + ".");
         return 1;
     }
 
@@ -339,6 +359,52 @@ public final class BuilderCommand {
         ServerPlayer player = player(ctx);
         player.getInventory().clearContent();
         message(player, "Cleared your inventory.");
+        return 1;
+    }
+
+    /**
+     * /clearentities - removes every entity inside the selected area; with a radius argument,
+     * every entity within that many blocks of the player instead. Players are never removed.
+     * Off-grid blocks are entities here too, so they are removed with their display child.
+     */
+    private static int clearEntities(CommandContext<CommandSourceStack> ctx, int radius) throws CommandSyntaxException {
+        ServerPlayer player = player(ctx);
+        Level level = player.level();
+        AABB box;
+        String what;
+        if (radius > 0) {
+            box = player.getBoundingBox().inflate(radius);
+            what = "radius " + radius;
+        } else {
+            SelectionStore.Region r = region(player);
+            if (!validRegion(player, r)) {
+                return 0;
+            }
+            box = new AABB(r.min().getX(), r.min().getY(), r.min().getZ(),
+                    r.max().getX() + 1, r.max().getY() + 1, r.max().getZ() + 1);
+            what = "selection";
+        }
+        int count = 0;
+        for (Entity entity : level.getEntitiesOfClass(Entity.class, box)) {
+            if (entity instanceof Player) {
+                continue;
+            }
+            if (entity instanceof OffGridBlockEntity block) {
+                block.discardWithDisplay();
+            } else if (entity instanceof Display
+                    && entity.getTags().contains(BuilderServerHandler.OFF_GRID_TAG)) {
+                // The solid counterpart removes the display; only orphan it if the solid itself is
+                // outside the box (e.g. solid removed earlier in this pass).
+                if (BuilderServerHandler.findOffGrid(level, entity.getX(), entity.getY(), entity.getZ()) == null) {
+                    entity.discard();
+                }
+                continue;
+            } else {
+                entity.discard();
+            }
+            count++;
+        }
+        message(player, "Removed " + count + " entit(ies) in the " + what + ".");
         return 1;
     }
 

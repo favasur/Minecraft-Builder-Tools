@@ -41,6 +41,14 @@ public class OffGridBlockEntity extends Entity {
     private static final EntityDataAccessor<Float> DATA_YAW = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> DATA_PITCH = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Boolean> DATA_COLLIDABLE = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Boolean> DATA_BILLBOARD = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.BOOLEAN);
+    /** The world-space center of the block model (rotation pivot), which can be fractional so
+     *  flush-adjacent blocks form rotated strata. Everything else (collision box, visual anchor)
+     *  is derived from this center, so a block placed diagonally still collides exactly where its
+     *  rotated model renders. */
+    private static final EntityDataAccessor<Float> DATA_CX = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> DATA_CY = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> DATA_CZ = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.FLOAT);
 
     /** UUID of the linked {@code BlockDisplay} that renders the rotated model (server-only). */
     private UUID displayUuid;
@@ -55,6 +63,10 @@ public class OffGridBlockEntity extends Entity {
         builder.define(DATA_YAW, 0.0f);
         builder.define(DATA_PITCH, 0.0f);
         builder.define(DATA_COLLIDABLE, true);
+        builder.define(DATA_BILLBOARD, false);
+        builder.define(DATA_CX, 0.0f);
+        builder.define(DATA_CY, 0.0f);
+        builder.define(DATA_CZ, 0.0f);
     }
 
     public BlockState getRepresentedState() {
@@ -86,6 +98,15 @@ public class OffGridBlockEntity extends Entity {
         this.entityData.set(DATA_COLLIDABLE, collidable);
     }
 
+    /** True when the block is a billboard that always faces the player. */
+    public boolean isBillboard() {
+        return this.entityData.get(DATA_BILLBOARD);
+    }
+
+    public void setBillboard(boolean billboard) {
+        this.entityData.set(DATA_BILLBOARD, billboard);
+    }
+
     @Nullable
     public UUID getDisplayUuid() {
         return this.displayUuid;
@@ -95,13 +116,25 @@ public class OffGridBlockEntity extends Entity {
         this.displayUuid = uuid;
     }
 
+    /** The world-space model center (rotation pivot). */
+    public Vec3 modelCenter() {
+        return new Vec3(this.entityData.get(DATA_CX), this.entityData.get(DATA_CY), this.entityData.get(DATA_CZ));
+    }
+
+    public void setModelCenter(double x, double y, double z) {
+        this.entityData.set(DATA_CX, (float) x);
+        this.entityData.set(DATA_CY, (float) y);
+        this.entityData.set(DATA_CZ, (float) z);
+    }
+
     @Override
     public void onSyncedDataUpdated(EntityDataAccessor<?> key) {
         super.onSyncedDataUpdated(key);
         // Keep the bounding box glued to the rotated visual: whenever the block or its rotation
         // changes (server-side and after syncing to clients), re-center the entity on the visual's
         // collision box and re-measure it, so the hitbox always matches what the player sees.
-        if (DATA_BLOCK_STATE.equals(key) || DATA_YAW.equals(key) || DATA_PITCH.equals(key)) {
+        if (DATA_BLOCK_STATE.equals(key) || DATA_YAW.equals(key) || DATA_PITCH.equals(key)
+                || DATA_CX.equals(key) || DATA_CY.equals(key) || DATA_CZ.equals(key)) {
             if (this.level() != null) {
                 // getBoundingBox() is final and is built by makeBoundingBox(), which is bottom-
                 // anchored in Y and centered in X/Z on the entity position. So the entity must sit
@@ -130,40 +163,19 @@ public class OffGridBlockEntity extends Entity {
 
     /**
      * The world-space collision box of the rotated model: the block's shape bounds rotated by the
-     * placement yaw/pitch around the cell center, mapped back onto the cell. Axis-aligned blocks
-     * keep the exact shape bounds of the cell.
+     * placement yaw/pitch around the model center, mapped back onto the world. Because the box is
+     * derived from the same center and rotation as the rendered display, a diagonal block collides
+     * exactly where its rotated model renders - no invisible bumps, and flush-adjacent strata stay
+     * flush.
      */
     public AABB visualCollisionBox() {
         BlockState state = getRepresentedState();
         AABB shape = this.level() != null
                 ? state.getCollisionShape(this.level(), BlockPos.ZERO).bounds()
                 : new AABB(0, 0, 0, 1, 1, 1);
-        float yaw = getPlacementYaw();
-        float pitch = getPlacementPitch();
-        if (yaw == 0.0f && pitch == 0.0f) {
-            BlockPos c = cell();
-            return new AABB(c.getX() + shape.minX, c.getY() + shape.minY, c.getZ() + shape.minZ,
-                    c.getX() + shape.maxX, c.getY() + shape.maxY, c.getZ() + shape.maxZ);
-        }
-        org.joml.Quaternionf rot = net.buildertools.util.OffGridTransform.rotation(yaw, pitch);
-        double minX = 9, minY = 9, minZ = 9, maxX = -9, maxY = -9, maxZ = -9;
-        for (int i = 0; i < 8; i++) {
-            float px = (i & 1) == 0 ? (float) shape.minX : (float) shape.maxX;
-            float py = (i & 2) == 0 ? (float) shape.minY : (float) shape.maxY;
-            float pz = (i & 4) == 0 ? (float) shape.minZ : (float) shape.maxZ;
-            org.joml.Vector3f p = new org.joml.Vector3f(px - 0.5f, py - 0.5f, pz - 0.5f);
-            rot.transform(p);
-            p.add(0.5f, 0.5f, 0.5f);
-            minX = Math.min(minX, p.x);
-            maxX = Math.max(maxX, p.x);
-            minY = Math.min(minY, p.y);
-            maxY = Math.max(maxY, p.y);
-            minZ = Math.min(minZ, p.z);
-            maxZ = Math.max(maxZ, p.z);
-        }
-        BlockPos c = cell();
-        return new AABB(c.getX() + minX, c.getY() + minY, c.getZ() + minZ,
-                c.getX() + maxX, c.getY() + maxY, c.getZ() + maxZ);
+        Vec3 c = modelCenter();
+        return net.buildertools.util.OffGridTransform.boxAround(
+                c.x, c.y, c.z, getPlacementYaw(), getPlacementPitch(), shape);
     }
 
     /**
@@ -238,6 +250,12 @@ public class OffGridBlockEntity extends Entity {
     protected void readAdditionalSaveData(ValueInput input) {
         input.read("block_state", BlockState.CODEC).ifPresent(this::setRepresentedState);
         this.setPlacementRotation(input.getFloatOr("yaw", 0.0f), input.getFloatOr("pitch", 0.0f));
+        // Blocks saved before the center was stored: derive it from the entity position,
+        // which was the bottom-center of the cell box (X/Z at cell center, Y at the base).
+        double cx = input.read("cx", com.mojang.serialization.Codec.DOUBLE).orElseGet(() -> this.getX());
+        double cy = input.read("cy", com.mojang.serialization.Codec.DOUBLE).orElseGet(() -> this.getY() + 0.5);
+        double cz = input.read("cz", com.mojang.serialization.Codec.DOUBLE).orElseGet(() -> this.getZ());
+        this.setModelCenter(cx, cy, cz);
         input.getString("display").ifPresent(s -> {
             try {
                 this.setDisplayUuid(UUID.fromString(s));
@@ -245,6 +263,7 @@ public class OffGridBlockEntity extends Entity {
             }
         });
         this.setSolidCollidable(input.getBooleanOr("collidable", true));
+        this.setBillboard(input.getBooleanOr("billboard", false));
     }
 
     @Override
@@ -252,14 +271,19 @@ public class OffGridBlockEntity extends Entity {
         output.store("block_state", BlockState.CODEC, this.getRepresentedState());
         output.putFloat("yaw", this.getPlacementYaw());
         output.putFloat("pitch", this.getPlacementPitch());
+        Vec3 c = this.modelCenter();
+        output.putDouble("cx", c.x);
+        output.putDouble("cy", c.y);
+        output.putDouble("cz", c.z);
         if (this.displayUuid != null) {
             output.putString("display", this.displayUuid.toString());
         }
         output.putBoolean("collidable", this.isSolidCollidable());
+        output.putBoolean("billboard", this.isBillboard());
     }
 
-    /** Convenience: the cell this solid block occupies. */
+    /** The grid cell containing the model center (used for legacy cell matching). */
     public BlockPos cell() {
-        return new BlockPos(this.getBlockX(), this.getBlockY(), this.getBlockZ());
+        return BlockPos.containing(modelCenter());
     }
 }

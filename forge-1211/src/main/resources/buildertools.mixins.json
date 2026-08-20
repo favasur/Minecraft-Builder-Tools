@@ -5,6 +5,7 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "PlayerMixin",
+    "LocalPlayerMixin",
     "GuiMixin",
     "ItemRendererMixin",
     "DisplayAccessor",

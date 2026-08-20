@@ -7,9 +7,9 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
-import org.lwjgl.glfw.GLFW;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
+import org.lwjgl.glfw.GLFW;
 
 /**
  * Off-grid placement preview (Hytale-style offset placement): press R while holding a block to
@@ -24,9 +24,11 @@ public final class BlockRotateState {
     private static boolean active;
     private static BlockPos target;
     private static boolean fixedTarget;   // true while re-rotating a placed block in place
+    private static Vec3 fixedCenter;      // the placed block's (fractional) model center, when re-rotating
     private static BlockState previewState; // block shown in the preview (null = use held item)
     private static float yaw;
     private static float pitch;
+    private static boolean billboard;   // true = the block always faces the player (Hytale billboard)
     private static double lastAngle;
     private static double lastPitch;
 
@@ -49,6 +51,16 @@ public final class BlockRotateState {
         return pitch;
     }
 
+    /** True when the preview block is billboarded (always faces the player). */
+    public static boolean isBillboard() {
+        return billboard;
+    }
+
+    /** Toggles the player-facing billboard mode on/off. */
+    public static void toggleBillboard() {
+        billboard = !billboard;
+    }
+
     /** The block to render in the preview; null means "use the held item". */
     public static BlockState getPreviewState() {
         return previewState;
@@ -59,22 +71,38 @@ public final class BlockRotateState {
         return fixedTarget;
     }
 
+    /** The world-space center the placed block will have: the fixed model center when
+     *  re-rotating a placed block, otherwise the center of the cursor-following cell. */
+    public static Vec3 getCenter() {
+        return fixedCenter != null ? fixedCenter : Vec3.atCenterOf(target);
+    }
+
+    /** The fixed model center when re-rotating a placed block, else null. */
+    public static Vec3 getFixedCenter() {
+        return fixedCenter;
+    }
+
     /** Enters placement-preview mode: the cell follows the cursor, starting unrotated. */
     public static void start(Player player) {
         target = placementCell(player);
         yaw = 0.0f;
         pitch = 0.0f;
         fixedTarget = false;
+        fixedCenter = null;
+        billboard = false;
         previewState = null;
         captureAngles(player);
         active = true;
     }
 
-    /** Enters re-rotation mode for an existing off-grid block in {@code cell}. */
-    public static void start(Player player, BlockPos cell, float baseYaw, float basePitch, BlockState state) {
+    /** Enters re-rotation mode for an existing off-grid block in {@code cell}, keeping its
+     *  (possibly fractional) model center fixed so it spins strictly in place. */
+    public static void start(Player player, BlockPos cell, Vec3 center, float baseYaw, float basePitch, BlockState state) {
         target = cell;
+        fixedCenter = center;
         yaw = baseYaw;
         pitch = basePitch;
+        billboard = false; // re-rotating a placed block always starts a manual (non-billboard) spin
         fixedTarget = true;
         previewState = state;
         captureAngles(player);
@@ -85,17 +113,25 @@ public final class BlockRotateState {
         active = false;
         target = null;
         fixedTarget = false;
+        fixedCenter = null;
         previewState = null;
         yaw = 0.0f;
         pitch = 0.0f;
+        billboard = false;
     }
 
-    /** Follows the cursor around the preview cell each tick; keeps the target cell in sync. */
+    /**
+     * Follows the cursor around the preview cell each tick; keeps the target cell in sync. While
+     * the left button is held (actively rotating) the cell stays LOCKED at the spot where the
+     * rotation started, so the block spins strictly in place - it never slides around the vanilla
+     * grid or "squirms" onto neighboring blocks while its angle is being changed. Releasing the
+     * button lets the preview follow the cursor again for re-aiming.
+     */
     public static void update(Player player) {
         if (!active) {
             return;
         }
-        if (!fixedTarget) {
+        if (!fixedTarget && !isLeftMouseDown()) {
             BlockPos cell = placementCell(player);
             if (cell != null) {
                 target = cell;
@@ -104,7 +140,7 @@ public final class BlockRotateState {
         if (target == null) {
             return;
         }
-        Vec3 center = Vec3.atCenterOf(target);
+        Vec3 center = getCenter();
         Vec3 eye = player.getEyePosition(1.0f);
         Vec3 dir = player.getLookAngle();
         double t = 0.0;
@@ -122,15 +158,32 @@ public final class BlockRotateState {
         double dz = hit.z - center.z;
         double pitchAngle = Math.atan2(hit.y - center.y, Math.sqrt(dx * dx + dz * dz));
         double dp = pitchAngle - lastPitch;
-        if (isLeftMouseDown()) {
+        if (isLeftMouseDown() && !billboard) {
             // Rotate only while the left mouse button is held (drag to rotate, like Hytale). The
             // baselines refresh every tick, so releasing and re-pressing never causes a jump.
-            // Wrap the step so crossing +/-180 deg never snaps the block around.
+            // Wrap the step so crossing +/-180 deg never snaps the block around. In billboard
+            // mode the block always faces the player instead, so dragging is ignored.
             yaw += (float) Math.toDegrees(Math.atan2(Math.sin(d), Math.cos(d)));
             pitch += (float) Math.toDegrees(Math.atan2(Math.sin(dp), Math.cos(dp)));
         }
         lastAngle = angle;
         lastPitch = pitchAngle;
+    }
+
+    /**
+     * Yaw/pitch (degrees) that make the block's +Z face the player's eye, matching what the
+     * placed display's CENTER billboard constraint will render - used by the preview while the
+     * block is billboarded so it shows exactly what will be placed.
+     */
+    public static float[] facingAngles(Player player, Vec3 center) {
+        Vec3 eye = player.getEyePosition(1.0f);
+        double dx = center.x - eye.x;
+        double dy = center.y - eye.y;
+        double dz = center.z - eye.z;
+        double h = Math.sqrt(dx * dx + dz * dz);
+        float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+        float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.max(h, 1.0E-4)));
+        return new float[]{yaw, pitch};
     }
 
     /** The real left-button state, since the vanilla key mapping is bypassed while previewing. */
@@ -159,7 +212,7 @@ public final class BlockRotateState {
             lastPitch = 0.0;
             return;
         }
-        Vec3 center = Vec3.atCenterOf(target);
+        Vec3 center = getCenter();
         Vec3 eye = player.getEyePosition(1.0f);
         Vec3 dir = player.getLookAngle();
         double t = 0.0;

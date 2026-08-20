@@ -3,6 +3,7 @@ package net.buildertools;
 import net.buildertools.client.ClientEvents;
 import net.buildertools.client.KeyBindings;
 import net.buildertools.client.OffGridBlockRenderer;
+import net.buildertools.client.RotatedBlockRenderer;
 import net.buildertools.client.SelectionRenderer;
 import net.buildertools.network.ModPackets;
 import net.buildertools.registry.ModEntities;
@@ -21,12 +22,16 @@ import net.neoforged.neoforge.event.BuildCreativeModeTabContentsEvent;
 public class BuilderToolsMod {
     public static final String MODID = "buildertools";
 
-    public BuilderToolsMod(IEventBus modEventBus) {
+    public BuilderToolsMod(IEventBus modEventBus, net.neoforged.fml.ModContainer container) {
         ModEntities.ENTITIES.register(modEventBus);
         ModItems.ITEMS.register(modEventBus);
         ModSounds.SOUND_EVENTS.register(modEventBus);
         modEventBus.addListener(ModPackets::register);
         modEventBus.addListener(this::addCreative);
+
+        // Bundled Smooth Terrain meshing (Surface Nets): config, packets and client hooks.
+        io.github.favasur.smoothterrain.config.SmoothTerrainConfigImpl.register(container, modEventBus);
+        io.github.favasur.smoothterrain.network.SmoothTerrainNetworkNeoForge.register(modEventBus);
 
         // Server-side safety net: keeps the tools from breaking/placing/interacting even if a
         // misbehaving client sends the vanilla packets anyway. Client cancels these first.
@@ -37,6 +42,8 @@ public class BuilderToolsMod {
             modEventBus.addListener(this::registerRenderers);
             NeoForge.EVENT_BUS.register(ClientEvents.class);
             NeoForge.EVENT_BUS.register(SelectionRenderer.class);
+            NeoForge.EVENT_BUS.register(RotatedBlockRenderer.class);
+            io.github.favasur.smoothterrain.neoforge.ClientInit.register(modEventBus);
         }
     }
 

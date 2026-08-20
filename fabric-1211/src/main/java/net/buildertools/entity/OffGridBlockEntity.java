@@ -4,6 +4,8 @@ import net.buildertools.server.BuilderServerHandler;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.Tag;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -38,7 +40,15 @@ public class OffGridBlockEntity extends Entity {
     private static final EntityDataAccessor<Float> DATA_YAW = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> DATA_PITCH = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Boolean> DATA_COLLIDABLE = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Boolean> DATA_BILLBOARD = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Optional<UUID>> DATA_DISPLAY = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.OPTIONAL_UUID);
+    /** The world-space center of the block model (rotation pivot), which can be fractional so
+     *  flush-adjacent blocks form rotated strata. Everything else (collision box, visual anchor)
+     *  is derived from this center, so a block placed diagonally still collides exactly where its
+     *  rotated model renders. */
+    private static final EntityDataAccessor<Float> DATA_CX = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> DATA_CY = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Float> DATA_CZ = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.FLOAT);
 
     public OffGridBlockEntity(EntityType<?> type, Level level) {
         super(type, level);
@@ -50,7 +60,11 @@ public class OffGridBlockEntity extends Entity {
         builder.define(DATA_YAW, 0.0f);
         builder.define(DATA_PITCH, 0.0f);
         builder.define(DATA_COLLIDABLE, true);
+        builder.define(DATA_BILLBOARD, false);
         builder.define(DATA_DISPLAY, Optional.empty());
+        builder.define(DATA_CX, 0.0f);
+        builder.define(DATA_CY, 0.0f);
+        builder.define(DATA_CZ, 0.0f);
     }
 
     public BlockState getRepresentedState() {
@@ -82,6 +96,15 @@ public class OffGridBlockEntity extends Entity {
         this.entityData.set(DATA_COLLIDABLE, collidable);
     }
 
+    /** True when the block is a billboard that always faces the player. */
+    public boolean isBillboard() {
+        return this.entityData.get(DATA_BILLBOARD);
+    }
+
+    public void setBillboard(boolean billboard) {
+        this.entityData.set(DATA_BILLBOARD, billboard);
+    }
+
     public Optional<UUID> getDisplayUuid() {
         return this.entityData.get(DATA_DISPLAY);
     }
@@ -90,13 +113,25 @@ public class OffGridBlockEntity extends Entity {
         this.entityData.set(DATA_DISPLAY, Optional.ofNullable(uuid));
     }
 
+    /** The world-space model center (rotation pivot). */
+    public Vec3 modelCenter() {
+        return new Vec3(this.entityData.get(DATA_CX), this.entityData.get(DATA_CY), this.entityData.get(DATA_CZ));
+    }
+
+    public void setModelCenter(double x, double y, double z) {
+        this.entityData.set(DATA_CX, (float) x);
+        this.entityData.set(DATA_CY, (float) y);
+        this.entityData.set(DATA_CZ, (float) z);
+    }
+
     @Override
     public void onSyncedDataUpdated(EntityDataAccessor<?> key) {
         super.onSyncedDataUpdated(key);
         // Keep the bounding box glued to the rotated visual: whenever the block or its rotation
         // changes (server-side and after syncing to clients), re-center the entity on the visual's
         // collision box and re-measure it, so the hitbox always matches what the player sees.
-        if (DATA_BLOCK_STATE.equals(key) || DATA_YAW.equals(key) || DATA_PITCH.equals(key)) {
+        if (DATA_BLOCK_STATE.equals(key) || DATA_YAW.equals(key) || DATA_PITCH.equals(key)
+                || DATA_CX.equals(key) || DATA_CY.equals(key) || DATA_CZ.equals(key)) {
             if (this.level() != null) {
                 // getBoundingBox() is final and is built by makeBoundingBox(), which is bottom-
                 // anchored in Y and centered in X/Z on the entity position. So the entity must sit
@@ -125,40 +160,19 @@ public class OffGridBlockEntity extends Entity {
 
     /**
      * The world-space collision box of the rotated model: the block's shape bounds rotated by the
-     * placement yaw/pitch around the cell center, mapped back onto the cell. Axis-aligned blocks
-     * keep the exact shape bounds of the cell.
+     * placement yaw/pitch around the model center, mapped back onto the world. Axis-aligned blocks
+     * keep the exact shape bounds centered on the model center. Because the box is derived from
+     * the same center and rotation as the rendered display, a diagonal block collides exactly
+     * where its rotated model renders - no invisible bumps, and flush-adjacent strata stay flush.
      */
     public AABB visualCollisionBox() {
         BlockState state = getRepresentedState();
         AABB shape = this.level() != null
                 ? state.getCollisionShape(this.level(), BlockPos.ZERO).bounds()
                 : new AABB(0, 0, 0, 1, 1, 1);
-        float yaw = getPlacementYaw();
-        float pitch = getPlacementPitch();
-        if (yaw == 0.0f && pitch == 0.0f) {
-            BlockPos c = cell();
-            return new AABB(c.getX() + shape.minX, c.getY() + shape.minY, c.getZ() + shape.minZ,
-                    c.getX() + shape.maxX, c.getY() + shape.maxY, c.getZ() + shape.maxZ);
-        }
-        org.joml.Quaternionf rot = net.buildertools.util.OffGridTransform.rotation(yaw, pitch);
-        double minX = 9, minY = 9, minZ = 9, maxX = -9, maxY = -9, maxZ = -9;
-        for (int i = 0; i < 8; i++) {
-            float px = (i & 1) == 0 ? (float) shape.minX : (float) shape.maxX;
-            float py = (i & 2) == 0 ? (float) shape.minY : (float) shape.maxY;
-            float pz = (i & 4) == 0 ? (float) shape.minZ : (float) shape.maxZ;
-            org.joml.Vector3f p = new org.joml.Vector3f(px - 0.5f, py - 0.5f, pz - 0.5f);
-            rot.transform(p);
-            p.add(0.5f, 0.5f, 0.5f);
-            minX = Math.min(minX, p.x);
-            maxX = Math.max(maxX, p.x);
-            minY = Math.min(minY, p.y);
-            maxY = Math.max(maxY, p.y);
-            minZ = Math.min(minZ, p.z);
-            maxZ = Math.max(maxZ, p.z);
-        }
-        BlockPos c = cell();
-        return new AABB(c.getX() + minX, c.getY() + minY, c.getZ() + minZ,
-                c.getX() + maxX, c.getY() + maxY, c.getZ() + maxZ);
+        return net.buildertools.util.OffGridTransform.boxAround(
+                modelCenter().x, modelCenter().y, modelCenter().z,
+                getPlacementYaw(), getPlacementPitch(), shape);
     }
 
     /**
@@ -239,11 +253,24 @@ public class OffGridBlockEntity extends Entity {
         this.setRepresentedState(net.minecraft.nbt.NbtUtils.readBlockState(
                 this.level().holderLookup(Registries.BLOCK), tag.getCompound("block_state")));
         this.setPlacementRotation(tag.getFloat("yaw"), tag.getFloat("pitch"));
+        if (tag.contains("center", Tag.TAG_LIST)) {
+            ListTag c = tag.getList("center", Tag.TAG_DOUBLE);
+            if (c.size() >= 3) {
+                this.setModelCenter(c.getDouble(0), c.getDouble(1), c.getDouble(2));
+            }
+        } else {
+            // Blocks saved before the center was stored: derive it from the entity position,
+            // which was the bottom-center of the cell box (X/Z at cell center, Y at the base).
+            this.setModelCenter(this.getX(), this.getY() + 0.5, this.getZ());
+        }
         if (tag.hasUUID("display")) {
             this.setDisplayUuid(tag.getUUID("display"));
         }
         if (tag.contains("collidable")) {
             this.setSolidCollidable(tag.getBoolean("collidable"));
+        }
+        if (tag.contains("billboard")) {
+            this.setBillboard(tag.getBoolean("billboard"));
         }
     }
 
@@ -252,12 +279,19 @@ public class OffGridBlockEntity extends Entity {
         tag.put("block_state", net.minecraft.nbt.NbtUtils.writeBlockState(this.getRepresentedState()));
         tag.putFloat("yaw", this.getPlacementYaw());
         tag.putFloat("pitch", this.getPlacementPitch());
+        Vec3 c = this.modelCenter();
+        ListTag cl = new ListTag();
+        cl.add(net.minecraft.nbt.DoubleTag.valueOf(c.x));
+        cl.add(net.minecraft.nbt.DoubleTag.valueOf(c.y));
+        cl.add(net.minecraft.nbt.DoubleTag.valueOf(c.z));
+        tag.put("center", cl);
         this.getDisplayUuid().ifPresent(uuid -> tag.putUUID("display", uuid));
         tag.putBoolean("collidable", this.isSolidCollidable());
+        tag.putBoolean("billboard", this.isBillboard());
     }
 
-    /** Convenience: the cell this solid block occupies. */
+    /** The grid cell containing the model center (used for legacy cell matching). */
     public BlockPos cell() {
-        return new BlockPos(this.getBlockX(), this.getBlockY(), this.getBlockZ());
+        return BlockPos.containing(modelCenter());
     }
 }

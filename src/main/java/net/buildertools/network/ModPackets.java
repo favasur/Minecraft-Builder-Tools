@@ -1,12 +1,15 @@
 package net.buildertools.network;
 
 import net.buildertools.BuilderToolsMod;
+import net.buildertools.network.packet.BlockRotationPacket;
 import net.buildertools.network.packet.EntityDeletePacket;
 import net.buildertools.network.packet.EntityDuplicatePacket;
 import net.buildertools.network.packet.EntityFreezePacket;
 import net.buildertools.network.packet.EntitySpawnPacket;
 import net.buildertools.network.packet.EntityTransformPacket;
+import net.buildertools.network.packet.FreeBlockBreakPacket;
 import net.buildertools.network.packet.OffGridBlockPacket;
+import net.buildertools.network.packet.RotationSyncPacket;
 import net.buildertools.network.packet.PlayerAbilitiesPacket;
 import net.buildertools.network.packet.PaintPacket;
 import net.buildertools.network.packet.PastePacket;
@@ -15,6 +18,7 @@ import net.buildertools.network.packet.SelectionCopyPacket;
 import net.buildertools.network.packet.SelectionFillPacket;
 import net.buildertools.network.packet.SelectionSyncPacket;
 import net.buildertools.network.packet.SmoothPacket;
+import net.buildertools.network.packet.SmoothTerrainTogglePacket;
 import net.buildertools.network.packet.StretchPacket;
 import net.buildertools.network.packet.UndoPacket;
 import net.buildertools.network.packet.WorldSettingsPacket;
@@ -41,6 +45,10 @@ public class ModPackets {
         registrar.playToServer(PlayerAbilitiesPacket.TYPE, PlayerAbilitiesPacket.STREAM_CODEC, PlayerAbilitiesPacket::handle);
         registrar.playToServer(EntityFreezePacket.TYPE, EntityFreezePacket.STREAM_CODEC, EntityFreezePacket::handle);
         registrar.playToServer(OffGridBlockPacket.TYPE, OffGridBlockPacket.STREAM_CODEC, OffGridBlockPacket::handle);
+        registrar.playToServer(BlockRotationPacket.TYPE, BlockRotationPacket.STREAM_CODEC, BlockRotationPacket::handle);
+        registrar.playToServer(FreeBlockBreakPacket.TYPE, FreeBlockBreakPacket.STREAM_CODEC, FreeBlockBreakPacket::handle);
+        registrar.playToClient(RotationSyncPacket.TYPE, RotationSyncPacket.STREAM_CODEC, RotationSyncPacket::handle);
+        registrar.playToClient(SmoothTerrainTogglePacket.TYPE, SmoothTerrainTogglePacket.STREAM_CODEC, SmoothTerrainTogglePacket::handle);
         // Two-way payload (client -> server keeps the command store in sync, server -> client
         // applies expand/contract/shift). playBidirectional registers the type once for both flows.
         registrar.playBidirectional(SelectionSyncPacket.TYPE, SelectionSyncPacket.STREAM_CODEC, SelectionSyncPacket::handle);

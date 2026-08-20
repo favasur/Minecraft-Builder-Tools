@@ -16,7 +16,7 @@ import static net.buildertools.BuilderToolsMod.MODID;
  * block display is spawned at the cell with the given yaw; when true the display in that cell is
  * removed (and its item dropped).
  */
-public record OffGridBlockPacket(int x, int y, int z, float yaw, float pitch, boolean remove)
+public record OffGridBlockPacket(double cx, double cy, double cz, float yaw, float pitch, boolean remove, boolean billboard)
         implements CustomPacketPayload {
     public static final Type<OffGridBlockPacket> TYPE = new Type<>(Identifier.fromNamespaceAndPath(MODID, "offgrid_block"));
 
@@ -24,22 +24,24 @@ public record OffGridBlockPacket(int x, int y, int z, float yaw, float pitch, bo
         @Override
         public OffGridBlockPacket decode(FriendlyByteBuf buf) {
             return new OffGridBlockPacket(
-                    buf.readVarInt(),
-                    buf.readVarInt(),
-                    buf.readVarInt(),
+                    buf.readDouble(),
+                    buf.readDouble(),
+                    buf.readDouble(),
                     buf.readFloat(),
                     buf.readFloat(),
+                    buf.readBoolean(),
                     buf.readBoolean());
         }
 
         @Override
         public void encode(FriendlyByteBuf buf, OffGridBlockPacket packet) {
-            buf.writeVarInt(packet.x());
-            buf.writeVarInt(packet.y());
-            buf.writeVarInt(packet.z());
+            buf.writeDouble(packet.cx());
+            buf.writeDouble(packet.cy());
+            buf.writeDouble(packet.cz());
             buf.writeFloat(packet.yaw());
             buf.writeFloat(packet.pitch());
             buf.writeBoolean(packet.remove());
+            buf.writeBoolean(packet.billboard());
         }
     };
 
@@ -53,9 +55,9 @@ public record OffGridBlockPacket(int x, int y, int z, float yaw, float pitch, bo
             Player player = context.player();
             if (player instanceof ServerPlayer serverPlayer) {
                 if (payload.remove()) {
-                    BuilderServerHandler.removeOffGrid(serverPlayer, payload.x(), payload.y(), payload.z());
+                    BuilderServerHandler.removeOffGrid(serverPlayer, payload.cx(), payload.cy(), payload.cz());
                 } else {
-                    BuilderServerHandler.placeOffGrid(serverPlayer, payload.x(), payload.y(), payload.z(), payload.yaw(), payload.pitch());
+                    BuilderServerHandler.placeOffGrid(serverPlayer, payload.cx(), payload.cy(), payload.cz(), payload.yaw(), payload.pitch(), payload.billboard());
                 }
             }
         });

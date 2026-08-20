@@ -12,11 +12,13 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import static net.buildertools.BuilderToolsMod.MODID;
 
 /**
- * Client -> Server: place, re-rotate or remove an off-grid (rotated) block. When {@code remove}
- * is false the block display in the cell is (re)placed with the given yaw/pitch; when true the
- * display in that cell is removed (and its item dropped).
+ * Client -> Server: place, re-rotate or remove an off-grid (rotated) block. The position is the
+ * block model's world-space CENTER (fractional - flush-adjacent blocks in a rotated stratum have
+ * fractional centers), so {@code remove} matches the block whose center is closest to it, and
+ * placement spawns the model centered there.
  */
-public record OffGridBlockPacket(int x, int y, int z, float yaw, float pitch, boolean remove)
+public record OffGridBlockPacket(double cx, double cy, double cz, float yaw, float pitch, boolean remove,
+                                 boolean billboard)
         implements CustomPacketPayload {
     public static final Type<OffGridBlockPacket> TYPE = new Type<>(ResourceLocation.fromNamespaceAndPath(MODID, "offgrid_block"));
 
@@ -24,22 +26,24 @@ public record OffGridBlockPacket(int x, int y, int z, float yaw, float pitch, bo
         @Override
         public OffGridBlockPacket decode(FriendlyByteBuf buf) {
             return new OffGridBlockPacket(
-                    buf.readVarInt(),
-                    buf.readVarInt(),
-                    buf.readVarInt(),
+                    buf.readDouble(),
+                    buf.readDouble(),
+                    buf.readDouble(),
                     buf.readFloat(),
                     buf.readFloat(),
+                    buf.readBoolean(),
                     buf.readBoolean());
         }
 
         @Override
         public void encode(FriendlyByteBuf buf, OffGridBlockPacket packet) {
-            buf.writeVarInt(packet.x());
-            buf.writeVarInt(packet.y());
-            buf.writeVarInt(packet.z());
+            buf.writeDouble(packet.cx());
+            buf.writeDouble(packet.cy());
+            buf.writeDouble(packet.cz());
             buf.writeFloat(packet.yaw());
             buf.writeFloat(packet.pitch());
             buf.writeBoolean(packet.remove());
+            buf.writeBoolean(packet.billboard());
         }
     };
 
@@ -53,10 +57,10 @@ public record OffGridBlockPacket(int x, int y, int z, float yaw, float pitch, bo
             Player player = context.player();
             if (player instanceof ServerPlayer serverPlayer) {
                 if (payload.remove()) {
-                    BuilderServerHandler.removeOffGrid(serverPlayer, payload.x(), payload.y(), payload.z());
+                    BuilderServerHandler.removeOffGrid(serverPlayer, payload.cx(), payload.cy(), payload.cz());
                 } else {
-                    BuilderServerHandler.placeOffGrid(serverPlayer, payload.x(), payload.y(), payload.z(),
-                            payload.yaw(), payload.pitch());
+                    BuilderServerHandler.placeOffGrid(serverPlayer, payload.cx(), payload.cy(), payload.cz(),
+                            payload.yaw(), payload.pitch(), payload.billboard());
                 }
             }
         });

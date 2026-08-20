@@ -18,7 +18,6 @@ import net.neoforged.neoforge.event.entity.player.PlayerEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.RegisterCommandsEvent;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
-import net.neoforged.neoforge.event.tick.ServerTickEvent;
 
 /**
  * Server-side handlers. The client cancels the equivalent events before any packet is sent, so the
@@ -63,10 +62,14 @@ public final class ServerEvents {
         if (item instanceof BlockItem) {
             // Off-grid blocks are placed via OffGridBlockPacket, but the vanilla use-item packet for
             // the same click may still arrive. Cancel the server's own placement so a cell does not
-            // end up with both a grid block and its off-grid display.
+            // end up with both a grid block and its off-grid display. Off-grid blocks are real
+            // geometry too: a vanilla block may not be placed into a cell its rotated model
+            // penetrates (flush-adjacent, touching placements are still allowed).
             BlockPos cell = event.getPos().relative(event.getFace());
             if (BuilderServerHandler.isRecentOffGridPlacement(player, cell)
-                    || BuilderServerHandler.findOffGrid(event.getLevel(), cell) != null) {
+                    || RotationStore.hasRotation(event.getLevel(), cell)
+                    || BuilderServerHandler.findOffGrid(event.getLevel(), cell) != null
+                    || BuilderServerHandler.vanillaPlacementOverlapsOffGrid(event.getLevel(), cell)) {
                 event.setCanceled(true);
             }
         }
@@ -108,9 +111,14 @@ public final class ServerEvents {
     }
 
     @SubscribeEvent
-    public static void onServerTick(ServerTickEvent.Post event) {
-        // Keeps the day/night cycle frozen while "Pause Time" is enabled in the Creative Settings.
-        BuilderServerHandler.tickPausedLevels(event.getServer());
+    public static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.getEntity() instanceof ServerPlayer serverPlayer) {
+            // Send the rotation layer so every rotated block renders rotated on this client.
+            RotationStore.syncAllTo(serverPlayer);
+            // Send the current Smooth Terrain world setting so this client matches the world.
+            serverPlayer.connection.send(new net.buildertools.network.packet.SmoothTerrainTogglePacket(
+                    io.github.favasur.smoothterrain.config.SmoothTerrainConfig.Server.collisionsEnabled));
+        }
     }
 
     @SubscribeEvent

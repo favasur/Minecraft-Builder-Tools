@@ -8,6 +8,8 @@ import net.buildertools.item.ScatterToolItem;
 import net.buildertools.item.SelectionToolItem;
 import net.buildertools.item.SmoothToolItem;
 import net.buildertools.client.settings.BuilderSettings;
+import net.buildertools.client.OffGridMining;
+import net.buildertools.entity.OffGridBlockEntity;
 import net.buildertools.util.OffGridTransform;
 import net.buildertools.selection.LaserState;
 import net.buildertools.selection.RulerState;
@@ -94,6 +96,12 @@ public final class SelectionRenderer implements DebugRenderer.SimpleDebugRendere
         // Off-grid placement preview: the block about to be placed, rotated around its cell.
         if (BlockRotateState.isActive()) {
             renderOffGridPreview(player);
+        }
+
+        // Progressive mining of an off-grid block (survival): a dark overlay whose opacity grows
+        // with the dig progress, so it breaks like a real block instead of popping off.
+        if (OffGridMining.isActive()) {
+            renderOffGridMining();
         }
     }
 
@@ -241,8 +249,19 @@ public final class SelectionRenderer implements DebugRenderer.SimpleDebugRendere
         if (target == null) {
             return;
         }
-        org.joml.Quaternionf rot = OffGridTransform.rotation(BlockRotateState.getYawDeg(), BlockRotateState.getPitchDeg());
-        Vec3 center = Vec3.atCenterOf(target);
+        Vec3 center = BlockRotateState.getCenter();
+        // Billboarded blocks always face the player (the placed display uses CENTER billboard
+        // constraints), so the preview turns the model toward the eye instead of the drag
+        // rotation; the ring turns green so the mode is visible at a glance.
+        float yaw = BlockRotateState.getYawDeg();
+        float pitch = BlockRotateState.getPitchDeg();
+        boolean billboard = BlockRotateState.isBillboard();
+        if (billboard) {
+            float[] facing = BlockRotateState.facingAngles(player, center);
+            yaw = facing[0];
+            pitch = facing[1];
+        }
+        org.joml.Quaternionf rot = OffGridTransform.rotation(yaw, pitch);
 
         // Rotated footprint: the 12 edges of the cell cube, rotated around the cell center so
         // the preview matches exactly what the placed display will show.
@@ -266,11 +285,39 @@ public final class SelectionRenderer implements DebugRenderer.SimpleDebugRendere
         }
 
         // Horizontal ring + marker along the block's rotated front (yaw direction).
-        drawRing(center, 0.85, 1, 0xFF9FD8FF);
+        drawRing(center, 0.85, 1, billboard ? 0xFF7CFC00 : 0xFF9FD8FF);
         org.joml.Vector3f front = rot.transform(new org.joml.Vector3f(0.5f, 0, 0), new org.joml.Vector3f());
         double fl = Math.sqrt(front.x * front.x + front.z * front.z);
         if (fl > 1.0E-4) {
             Gizmos.line(center, center.add(front.x / fl * 0.85, 0, front.z / fl * 0.85), 0xFFFFFFFF);
+        }
+    }
+
+    /**
+     * Crack overlay while progressively mining an off-grid block (survival): a translucent dark
+     * fill whose opacity grows with the dig progress, plus a wireframe box, so the player sees
+     * the block slowly breaking like a normal block instead of vanishing on the first hit.
+     */
+    private static void renderOffGridMining() {
+        OffGridBlockEntity block = OffGridMining.getTarget();
+        if (block == null || block.isRemoved()) {
+            return;
+        }
+        float p = Math.max(0.0f, Math.min(1.0f, OffGridMining.getProgress()));
+        AABB box = block.visualCollisionBox();
+        // Dark overlay grows with progress; a brightening outline keeps it readable on any block.
+        int alpha = (int) (255 * Math.min(1.0f, 0.15f + 0.7f * p));
+        int fill = (alpha << 24) | 0x000000;
+        Gizmos.cuboid(box, GizmoStyle.strokeAndFill(0xFFFFFFFF, 2.0f, fill));
+        // Crack-ish diagonals that appear as progress passes each quarter.
+        if (p > 0.25f) {
+            Gizmos.line(new Vec3(box.minX, box.minY, box.minZ), new Vec3(box.maxX, box.maxY, box.maxZ), 0xFFFFFFFF);
+        }
+        if (p > 0.5f) {
+            Gizmos.line(new Vec3(box.maxX, box.minY, box.minZ), new Vec3(box.minX, box.maxY, box.maxZ), 0xFFFFFFFF);
+        }
+        if (p > 0.75f) {
+            Gizmos.line(new Vec3(box.minX, box.minY, box.maxZ), new Vec3(box.maxX, box.maxY, box.minZ), 0xFFFFFFFF);
         }
     }
 

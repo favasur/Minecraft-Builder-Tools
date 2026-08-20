@@ -72,12 +72,12 @@ public final class CreativeSettingsScreen extends CreativeModeInventoryScreen {
         cy = section("World", cy);
         controls.add(new Slider("Time of Day", 0, 24000, 50,
                 this.player.level().getDayTime() % 24000,
-                v -> ClientPackets.sendToServer(new WorldSettingsPacket(Math.round(v), null, WorldSettingsPacket.SKIP_WEATHER)),
+                v -> ClientPackets.sendToServer(new WorldSettingsPacket(Math.round(v), null, WorldSettingsPacket.SKIP_WEATHER, null)),
                 x, cy, w));
         cy += 28;
         controls.add(new Toggle("Pause Time", () -> pauseTime, v -> {
             pauseTime = v;
-            ClientPackets.sendToServer(new WorldSettingsPacket(WorldSettingsPacket.SKIP_TIME, v, WorldSettingsPacket.SKIP_WEATHER));
+            ClientPackets.sendToServer(new WorldSettingsPacket(WorldSettingsPacket.SKIP_TIME, v, WorldSettingsPacket.SKIP_WEATHER, null));
         }, x, cy, w));
         cy += 28;
         int bw = (w - 8) / 3;
@@ -121,6 +121,14 @@ public final class CreativeSettingsScreen extends CreativeModeInventoryScreen {
                 x, cy, w));
         cy += 28;
 
+        cy = section("Terrain", cy);
+        controls.add(new Toggle("Smooth Terrain",
+                () -> io.github.favasur.smoothterrain.config.SmoothTerrainConfig.Client.render,
+                v -> ClientPackets.sendToServer(new WorldSettingsPacket(
+                        WorldSettingsPacket.SKIP_TIME, null, WorldSettingsPacket.SKIP_WEATHER, v)),
+                x, cy, w));
+        cy += 28;
+
         cy = section("Rendering", cy);
         controls.add(new Toggle("Fullbright", BuilderSettings::isFullbright, BuilderSettings::setFullbright, x, cy, w));
         cy += 28;
@@ -155,7 +163,7 @@ public final class CreativeSettingsScreen extends CreativeModeInventoryScreen {
     }
 
     private void sendWeather(int weather) {
-        ClientPackets.sendToServer(new WorldSettingsPacket(WorldSettingsPacket.SKIP_TIME, null, weather));
+        ClientPackets.sendToServer(new WorldSettingsPacket(WorldSettingsPacket.SKIP_TIME, null, weather, null));
     }
 
     /** Draws a section header and returns the y for the first control below it. */

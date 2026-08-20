@@ -65,7 +65,8 @@ public final class ServerEvents {
             // end up with both a grid block and its off-grid display.
             BlockPos cell = event.getPos().relative(event.getFace());
             if (BuilderServerHandler.isRecentOffGridPlacement(player, cell)
-                    || BuilderServerHandler.findOffGrid(event.getLevel(), cell) != null) {
+                    || BuilderServerHandler.findOffGrid(event.getLevel(), cell) != null
+                    || BuilderServerHandler.vanillaPlacementOverlapsOffGrid(event.getLevel(), cell)) {
                 event.setCanceled(true);
             }
         }

@@ -2,6 +2,8 @@ package net.buildertools.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
+import net.buildertools.client.OffGridMining;
+import net.buildertools.entity.OffGridBlockEntity;
 import net.buildertools.item.EntityToolItem;
 import net.buildertools.item.LaserToolItem;
 import net.buildertools.item.PaintToolItem;
@@ -106,6 +108,12 @@ public final class SelectionRenderer {
         // Off-grid placement preview: the block about to be placed, rotated around its cell.
         if (BlockRotateState.isActive()) {
             renderOffGridPreview(poseStack, buffers, player);
+        }
+
+        // Progressive mining of an off-grid block (survival): a dark crack overlay whose opacity
+        // grows with the dig progress, so it breaks like a real block instead of popping off.
+        if (OffGridMining.isActive()) {
+            renderOffGridMining(poseStack, buffers);
         }
     }
 
@@ -269,8 +277,19 @@ public final class SelectionRenderer {
         if (target == null) {
             return;
         }
-        org.joml.Quaternionf rot = OffGridTransform.rotation(BlockRotateState.getYawDeg(), BlockRotateState.getPitchDeg());
-        Vec3 center = Vec3.atCenterOf(target);
+        Vec3 center = BlockRotateState.getCenter();
+        // Billboarded blocks always face the player (the placed display uses CENTER billboard
+        // constraints), so the preview turns the model toward the eye instead of the drag
+        // rotation; the ring turns green so the mode is visible at a glance.
+        float yaw = BlockRotateState.getYawDeg();
+        float pitch = BlockRotateState.getPitchDeg();
+        boolean billboard = BlockRotateState.isBillboard();
+        if (billboard) {
+            float[] facing = BlockRotateState.facingAngles(player, center);
+            yaw = facing[0];
+            pitch = facing[1];
+        }
+        org.joml.Quaternionf rot = OffGridTransform.rotation(yaw, pitch);
 
         // Rotated footprint: the 12 edges of the cell cube, rotated around the cell center so
         // the preview matches exactly what the placed display will show.
@@ -295,7 +314,7 @@ public final class SelectionRenderer {
         }
 
         // Horizontal ring + marker along the block's rotated front (yaw direction).
-        drawRing(poseStack, lines, center, 0.85, 1, 0xFF9FD8FF);
+        drawRing(poseStack, lines, center, 0.85, 1, billboard ? 0xFF7CFC00 : 0xFF9FD8FF);
         org.joml.Vector3f front = rot.transform(new org.joml.Vector3f(0.5f, 0, 0), new org.joml.Vector3f());
         double fl = Math.sqrt(front.x * front.x + front.z * front.z);
         if (fl > 1.0E-4) {
@@ -314,7 +333,7 @@ public final class SelectionRenderer {
         }
         if (state != null) {
             poseStack.pushPose();
-            poseStack.translate(target.getX(), target.getY(), target.getZ());
+            poseStack.translate(center.x - 0.5, center.y - 0.5, center.z - 0.5);
             org.joml.Vector3f c = new org.joml.Vector3f(0.5f, 0.5f, 0.5f);
             org.joml.Vector3f t = new org.joml.Vector3f(c)
                     .sub(rot.transform(new org.joml.Vector3f(c), new org.joml.Vector3f()));
@@ -325,6 +344,37 @@ public final class SelectionRenderer {
                     LevelRenderer.getLightColor(player.level(), target),
                     OverlayTexture.NO_OVERLAY);
             poseStack.popPose();
+        }
+    }
+
+    /**
+     * Crack overlay while progressively mining an off-grid block (survival): a translucent dark
+     * fill whose opacity grows with the dig progress, plus a wireframe box, so the player sees
+     * the block slowly breaking like a normal block instead of vanishing on the first hit.
+     */
+    private static void renderOffGridMining(PoseStack poseStack, MultiBufferSource buffers) {
+        OffGridBlockEntity block = OffGridMining.getTarget();
+        if (block == null || block.isRemoved()) {
+            return;
+        }
+        float p = Math.max(0.0f, Math.min(1.0f, OffGridMining.getProgress()));
+        AABB box = block.visualCollisionBox();
+        // Dark overlay grows with progress; a brightening outline keeps it readable on any block.
+        DebugRenderer.renderFilledBox(poseStack, buffers, box, 0.0f, 0.0f, 0.0f, 0.08f + 0.55f * p);
+        VertexConsumer lines = buffers.getBuffer(RenderType.lines());
+        drawBox(poseStack, lines, box, 0xFFFFFFFF);
+        // Crack-ish diagonals that appear as progress passes each quarter.
+        if (p > 0.25f) {
+            drawLine(poseStack, lines,
+                    new Vec3(box.minX, box.minY, box.minZ), new Vec3(box.maxX, box.maxY, box.maxZ), 0xFFFFFFFF);
+        }
+        if (p > 0.5f) {
+            drawLine(poseStack, lines,
+                    new Vec3(box.maxX, box.minY, box.minZ), new Vec3(box.minX, box.maxY, box.maxZ), 0xFFFFFFFF);
+        }
+        if (p > 0.75f) {
+            drawLine(poseStack, lines,
+                    new Vec3(box.minX, box.minY, box.maxZ), new Vec3(box.maxX, box.maxY, box.minZ), 0xFFFFFFFF);
         }
     }
 

@@ -5,9 +5,16 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "PlayerMixin",
+    "LocalPlayerMixin",
     "ItemRendererMixin",
     "DisplayAccessor",
-    "BlockDisplayAccessor"
+    "BlockDisplayAccessor",
+    "LevelMixin",
+    "BlockGetterMixin",
+    "CollisionGetterMixin"
+  ],
+  "client": [
+    "MultiPlayerGameModeMixin"
   ],
   "injectors": {
     "defaultRequire": 1

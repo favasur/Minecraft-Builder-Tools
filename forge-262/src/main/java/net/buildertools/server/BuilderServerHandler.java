@@ -215,7 +215,7 @@ public final class BuilderServerHandler {
         SelectionStore.setRegion(player, nMin, nMax);
         ModPackets.CHANNEL.send(new SelectionSyncPacket(
                 true, nMin.getX(), nMin.getY(), nMin.getZ(), nMax.getX(), nMax.getY(), nMax.getZ()),
-                PacketDistributor.PLAYER.with(player));
+                net.minecraftforge.network.PacketDistributor.PLAYER.with(player));
         sendMessage(player, "Stretched " + changes.size() + " block(s).");
         playSound(player, ModSounds.FILL.get());
     }
@@ -482,63 +482,96 @@ public final class BuilderServerHandler {
      * transformation (what renders) and in the entity's yaw (so the client can read it back for
      * inheritance without needing the private transformation getter).
      */
-    public static void placeOffGrid(ServerPlayer player, int x, int y, int z, float yaw, float pitch) {
-        BlockPos pos = new BlockPos(x, y, z);
+    public static void placeOffGrid(ServerPlayer player, double cx, double cy, double cz, float yaw, float pitch,
+                                    boolean billboard) {
         ItemStack held = player.getMainHandItem();
         if (!(held.getItem() instanceof BlockItem blockItem)) {
             sendError(player, "Hold a block in your main hand to place off-grid.");
             return;
         }
-        if (player.distanceToSqr(Vec3.atCenterOf(pos)) > MAX_DISTANCE * MAX_DISTANCE) {
+        BlockState state = blockItem.getBlock().defaultBlockState();
+        BlockPos cell = BlockPos.containing(cx, cy, cz);
+        if (player.distanceToSqr(cx, cy, cz) > MAX_DISTANCE * MAX_DISTANCE) {
             sendError(player, "Position is too far away.");
             return;
         }
         Level level = player.level();
-        if (!level.hasChunkAt(pos)) {
+        if (!level.hasChunkAt(cell)) {
             sendError(player, "Area is not loaded.");
             return;
         }
-        BlockState existing = level.getBlockState(pos);
-        if (!existing.isAir() && !existing.canBeReplaced()) {
-            sendError(player, "A block is already in the way.");
+        // The new block's collision footprint (rotated model box) - used to reject mingling. The
+        // placement is judged by the NEIGHBOR geometry below (actual rotated models), never by the
+        // vanilla XYZ cell the fractional center falls in - a block placed flush against a rotated
+        // neighbor's face lands at a fractional center inside a partially-occupied cell and that
+        // is exactly the intended stratum-building behavior.
+        
+        AABB footprint = OffGridTransform.boxAround(cx, cy, cz, yaw, pitch,
+                state.getCollisionShape(level, cell).bounds());
+        if (player.getBoundingBox().intersects(footprint)) {
+            sendError(player, "You're in the way - move back first.");
             return;
         }
 
-        // Replace a stale off-grid block in the same cell (entity + its display).
-        OffGridBlockEntity previous = findOffGrid(level, pos);
-        if (previous != null) {
-            previous.discardWithDisplay();
+        // Re-rotating a block in place (R on an existing off-grid block): replace the block whose
+        // center is essentially AT the target (the client sends its exact center). Anything else
+        // must not penetrate another off-grid block's ACTUAL rotated model (touching is fine, so
+        // flush-adjacent rotated blocks can be built side by side), so placements never mingle.
+        OffGridBlockEntity atSpot = findOffGrid(level, cx, cy, cz);
+        if (atSpot != null && atSpot.modelCenter().distanceToSqr(new Vec3(cx, cy, cz)) < 0.0025) {
+            atSpot.discardWithDisplay();
+        } else {
+            AABB newShape = state.getCollisionShape(level, cell).bounds();
+            for (OffGridBlockEntity other : level.getEntitiesOfClass(OffGridBlockEntity.class,
+                    footprint.inflate(1.5))) {
+                if (OffGridTransform.modelsOverlap(
+                        cx, cy, cz, yaw, pitch, newShape,
+                        other.modelCenter().x, other.modelCenter().y, other.modelCenter().z,
+                        other.getPlacementYaw(), other.getPlacementPitch(),
+                        other.getRepresentedState().getCollisionShape(level, BlockPos.ZERO).bounds())) {
+                    sendError(player, "A block is already in the way.");
+                    return;
+                }
+            }
         }
 
-        Display.BlockDisplay display = new Display.BlockDisplay(EntityTypes.BLOCK_DISPLAY, level);
-        ((BlockDisplayAccessor) (Object) display).buildertools$setBlockState(blockItem.getBlock().defaultBlockState());
-        // The block model spans 0..1 from the entity position, so the display sits at the cell
-        // corner and the transformation rotates the model around the cell center. That keeps the
-        // block exactly on the vanilla grid while it spins in place (Hytale-style rotation).
-        display.setPos(pos.getX(), pos.getY(), pos.getZ());
+        Display.BlockDisplay display = new Display.BlockDisplay(net.minecraft.world.entity.EntityTypes.BLOCK_DISPLAY, level);
+        ((BlockDisplayAccessor) (Object) display).buildertools$setBlockState(state);
+        // The block model spans 0..1 from the entity position, so the display sits one half block
+        // away from the model center and the transformation rotates the model around the center.
+        // That keeps the block exactly where the player set it while it spins in place.
+        display.setPos(cx - 0.5, cy - 0.5, cz - 0.5);
         ((DisplayAccessor) (Object) display).buildertools$setTransformation(OffGridTransform.transformation(yaw, pitch));
+        // Billboard blocks always face the player (Hytale-style), overriding the stored rotation
+        // visually while keeping the stored yaw/pitch for the collision box and inheritance.
+        ((DisplayAccessor) (Object) display).buildertools$setBillboardConstraints(billboard
+                ? Display.BillboardConstraints.CENTER
+                : Display.BillboardConstraints.FIXED);
         display.addTag(OFF_GRID_TAG);
         level.addFreshEntity(display);
 
-        // The solid counterpart (like the original mod): a collidable entity occupies the cell,
-        // provides the collision box and stores the rotation from the placement preview.
+        // The solid counterpart (like the original mod): a collidable entity provides the
+        // collision box and stores the rotation from the placement preview. It derives its
+        // position and dimensions from the model center, so hitbox and visual stay glued.
         OffGridBlockEntity block = ModEntities.OFF_GRID_BLOCK.get().create(level, net.minecraft.world.entity.EntitySpawnReason.EVENT);
         if (block != null) {
-            block.setPos(pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5);
-            block.setRepresentedState(blockItem.getBlock().defaultBlockState());
+            block.setRepresentedState(state);
             block.setPlacementRotation(yaw, pitch);
+            block.setModelCenter(cx, cy, cz);
+            block.setBillboard(billboard);
             block.setDisplayUuid(display.getUUID());
             block.addTag(OFF_GRID_TAG);
             level.addFreshEntity(block);
         }
         // Remember the cell: the vanilla use-item packet for the same click may arrive next, and
         // the server-side right-click handler uses this record to cancel that duplicate placement.
-        recordOffGridPlacement(player, pos);
+        recordOffGridPlacement(player, cell);
 
         if (!player.getAbilities().instabuild) {
             held.shrink(1);
         }
-        sendMessage(player, "Placed off-grid block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch) + ").");
+        sendMessage(player, "Placed off-grid block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
+                + (billboard ? ", billboard" : "") + ").");
         playSound(player, ModSounds.SET_CORNER_1.get());
     }
 
@@ -560,23 +593,46 @@ public final class BuilderServerHandler {
         RECENT_OFF_GRID.remove(uuid);
     }
 
+    /**
+     * True when a vanilla block placed into {@code cell} (a full cube there) would penetrate any
+     * off-grid block's actual rotated model. Off-grid blocks are real geometry, so vanilla blocks
+     * cannot be placed on top of, or clipping through, them - flush-adjacent placement (touching)
+     * is still allowed.
+     */
+    public static boolean vanillaPlacementOverlapsOffGrid(Level level, BlockPos cell) {
+        AABB cubeShape = new AABB(0, 0, 0, 1, 1, 1);
+        for (OffGridBlockEntity other : level.getEntitiesOfClass(OffGridBlockEntity.class,
+                new AABB(cell).inflate(1.5))) {
+            if (!other.entityTags().contains(OFF_GRID_TAG)) {
+                continue;
+            }
+            if (OffGridTransform.modelsOverlap(
+                    cell.getX() + 0.5, cell.getY() + 0.5, cell.getZ() + 0.5, 0.0f, 0.0f, cubeShape,
+                    other.modelCenter().x, other.modelCenter().y, other.modelCenter().z,
+                    other.getPlacementYaw(), other.getPlacementPitch(),
+                    other.getRepresentedState().getCollisionShape(level, BlockPos.ZERO).bounds())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /** Removes the off-grid display in the cell (dropping its item in survival) and plays a break sound. */
-    public static void removeOffGrid(ServerPlayer player, int x, int y, int z) {
-        BlockPos pos = new BlockPos(x, y, z);
-        if (player.distanceToSqr(Vec3.atCenterOf(pos)) > MAX_DISTANCE * MAX_DISTANCE) {
+    public static void removeOffGrid(ServerPlayer player, double cx, double cy, double cz) {
+        if (player.distanceToSqr(cx, cy, cz) > MAX_DISTANCE * MAX_DISTANCE) {
             sendError(player, "Position is too far away.");
             return;
         }
         Level level = player.level();
-        OffGridBlockEntity block = findOffGrid(level, pos);
+        OffGridBlockEntity block = findOffGrid(level, cx, cy, cz);
         if (block == null) {
             return;
         }
         if (!player.getAbilities().instabuild) {
-            net.minecraft.world.level.block.state.BlockState state = block.getRepresentedState();
+            BlockState state = block.getRepresentedState();
             if (!state.isAir()) {
                 level.addFreshEntity(new ItemEntity(level,
-                        pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
+                        cx, cy + 0.25, cz,
                         new ItemStack(state.getBlock())));
             }
         }
@@ -584,11 +640,30 @@ public final class BuilderServerHandler {
         playSound(player, ModSounds.SET_CORNER_2.get());
     }
 
+    /** Finds the solid off-grid block whose model center is nearest the given point, or null. */
+    public static OffGridBlockEntity findOffGrid(Level level, double x, double y, double z) {
+        double best = 0.36; // within 0.6 blocks
+        OffGridBlockEntity bestBlock = null;
+        for (OffGridBlockEntity block : level.getEntitiesOfClass(OffGridBlockEntity.class,
+                new AABB(x - 0.75, y - 0.75, z - 0.75, x + 0.75, y + 0.75, z + 0.75))) {
+            if (!block.entityTags().contains(OFF_GRID_TAG)) {
+                continue;
+            }
+            double d = block.modelCenter().distanceToSqr(new Vec3(x, y, z));
+            if (d < best) {
+                best = d;
+                bestBlock = block;
+            }
+        }
+        return bestBlock;
+    }
+
     /** Finds the solid off-grid block occupying the given cell, or null. */
     public static OffGridBlockEntity findOffGrid(Level level, BlockPos pos) {
         for (OffGridBlockEntity block : level.getEntitiesOfClass(OffGridBlockEntity.class,
-                new AABB(pos.getX(), pos.getY(), pos.getZ(), pos.getX() + 1, pos.getY() + 1, pos.getZ() + 1))) {
-            if (block.entityTags().contains(OFF_GRID_TAG)) {
+                new AABB(pos.getX() - 1, pos.getY() - 1, pos.getZ() - 1,
+                        pos.getX() + 2, pos.getY() + 2, pos.getZ() + 2))) {
+            if (block.entityTags().contains(OFF_GRID_TAG) && block.cell().equals(pos)) {
                 return block;
             }
         }
@@ -613,19 +688,23 @@ public final class BuilderServerHandler {
             return;
         }
         if (entity instanceof OffGridBlockEntity offGrid) {
-            // Snap the solid block into the cell and rotate it in place; the display child moves
-            // to the new cell corner and takes the new rotation so visuals match the hitbox.
-            BlockPos cell = BlockPos.containing(x, y, z);
-            offGrid.setPos(cell.getX() + 0.5, cell.getY(), cell.getZ() + 0.5);
+            // Keep the block exactly where the client placed it (fractional model center, off the
+            // grid - the whole point of off-grid blocks) and rotate it in place; the display
+            // child moves to the matching position and takes the new rotation so visuals match
+            // the hitbox (both derive from the same model center).
+            double cx = x;
+            double cy = y;
+            double cz = z;
+            offGrid.setModelCenter(cx, cy, cz);
             offGrid.setPlacementRotation(yaw, pitch);
             offGrid.setYRot(yaw);
             offGrid.setXRot(pitch);
             offGrid.setYHeadRot(yaw);
             UUID displayUuid = offGrid.getDisplayUuid();
             if (displayUuid != null) {
-                Entity display = player.level().getEntity(displayUuid);
+                Entity display = ((net.minecraft.server.level.ServerLevel) player.level()).getEntity(displayUuid);
                 if (display instanceof Display.BlockDisplay blockDisplay) {
-                    blockDisplay.setPos(cell.getX(), cell.getY(), cell.getZ());
+                    blockDisplay.setPos(cx - 0.5, cy - 0.5, cz - 0.5);
                     ((DisplayAccessor) (Object) blockDisplay)
                             .buildertools$setTransformation(OffGridTransform.transformation(yaw, pitch));
                 }
