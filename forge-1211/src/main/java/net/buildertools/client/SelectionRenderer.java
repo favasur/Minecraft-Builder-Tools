@@ -13,6 +13,7 @@ import net.buildertools.item.ScatterToolItem;
 import net.buildertools.item.SelectionToolItem;
 import net.buildertools.item.SmoothToolItem;
 import net.buildertools.client.settings.BuilderSettings;
+import net.buildertools.client.FreeBlockMining;
 import net.buildertools.client.OffGridMining;
 import net.buildertools.entity.OffGridBlockEntity;
 import net.buildertools.util.OffGridTransform;
@@ -121,6 +122,9 @@ public final class SelectionRenderer {
         // grows with the dig progress, so it breaks like a real block instead of popping off.
         if (OffGridMining.isActive()) {
             renderOffGridMining(poseStack, buffers);
+        }
+        if (FreeBlockMining.isActive()) {
+            renderFreeBlockMining(poseStack, buffers);
         }
 
         buffers.endBatch();
@@ -398,6 +402,34 @@ public final class SelectionRenderer {
         VertexConsumer lines = buffers.getBuffer(RenderType.lines());
         drawBox(poseStack, lines, box, 0xFFFFFFFF);
         // Crack-ish diagonals that appear as progress passes each quarter.
+        if (p > 0.25f) {
+            drawLine(poseStack, lines,
+                    new Vec3(box.minX, box.minY, box.minZ), new Vec3(box.maxX, box.maxY, box.maxZ), 0xFFFFFFFF);
+        }
+        if (p > 0.5f) {
+            drawLine(poseStack, lines,
+                    new Vec3(box.maxX, box.minY, box.minZ), new Vec3(box.minX, box.maxY, box.maxZ), 0xFFFFFFFF);
+        }
+        if (p > 0.75f) {
+            drawLine(poseStack, lines,
+                    new Vec3(box.minX, box.minY, box.maxZ), new Vec3(box.maxX, box.maxY, box.minZ), 0xFFFFFFFF);
+        }
+    }
+
+    /**
+     * Crack overlay while progressively mining a rotated block (survival) - same visual as the
+     * legacy entity path, drawn at the block's cell.
+     */
+    private static void renderFreeBlockMining(PoseStack poseStack, MultiBufferSource.BufferSource buffers) {
+        BlockPos pos = FreeBlockMining.getTarget();
+        if (pos == null) {
+            return;
+        }
+        float p = Math.max(0.0f, Math.min(1.0f, FreeBlockMining.getProgress()));
+        AABB box = new AABB(pos);
+        DebugRenderer.renderFilledBox(poseStack, buffers, box, 0.0f, 0.0f, 0.0f, 0.08f + 0.55f * p);
+        VertexConsumer lines = buffers.getBuffer(RenderType.lines());
+        drawBox(poseStack, lines, box, 0xFFFFFFFF);
         if (p > 0.25f) {
             drawLine(poseStack, lines,
                     new Vec3(box.minX, box.minY, box.minZ), new Vec3(box.maxX, box.maxY, box.maxZ), 0xFFFFFFFF);

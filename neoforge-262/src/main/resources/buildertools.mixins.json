@@ -8,6 +8,10 @@
     "LocalPlayerMixin",
     "DisplayAccessor",
     "BlockDisplayAccessor",
+    "BlockGetterMixin",
+    "LevelMixin",
+    "CollisionGetterMixin",
+    "MultiPlayerGameModeMixin"
   ],
   "injectors": {
     "defaultRequire": 1

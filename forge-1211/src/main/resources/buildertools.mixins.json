@@ -9,7 +9,11 @@
     "GuiMixin",
     "ItemRendererMixin",
     "DisplayAccessor",
-    "BlockDisplayAccessor"
+    "BlockDisplayAccessor",
+    "BlockGetterMixin",
+    "CollisionGetterMixin",
+    "LevelMixin",
+    "MultiPlayerGameModeMixin"
   ],
   "injectors": {
     "defaultRequire": 1

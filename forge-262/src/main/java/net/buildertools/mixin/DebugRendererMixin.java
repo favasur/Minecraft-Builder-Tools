@@ -1,5 +1,6 @@
 package net.buildertools.mixin;
 
+import net.buildertools.client.RotatedBlockRenderer;
 import net.buildertools.client.SelectionRenderer;
 import net.minecraft.client.renderer.debug.DebugRenderer;
 import org.spongepowered.asm.mixin.Final;
@@ -26,5 +27,6 @@ public abstract class DebugRendererMixin {
     @Inject(method = "refreshRendererList", at = @At("RETURN"))
     private void buildertools$addBuilderRenderer(CallbackInfo ci) {
         renderers.add(SelectionRenderer.instance());
+        renderers.add(RotatedBlockRenderer.instance());
     }
 }

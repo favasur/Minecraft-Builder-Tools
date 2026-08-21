@@ -1,7 +1,10 @@
 package net.buildertools.util;
 
 import com.mojang.math.Transformation;
+import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
@@ -122,5 +125,64 @@ public final class OffGridTransform {
             }
         }
         return new AABB(minX, minY, minZ, maxX, maxY, maxZ);
+    }
+
+    // ------------------------------------------------------------------
+    // Real-block rotated collision: a voxelized approximation of the rotated
+    // model so the hitbox matches the rotated render (Minecraft collision can
+    // only be axis-aligned boxes, so the rotated cube is stepped into a grid).
+    // ------------------------------------------------------------------
+
+    private static final java.util.Map<ShapeKey, VoxelShape> SHAPE_CACHE = new java.util.HashMap<>();
+    private static final int GRID = 8;
+
+    private record ShapeKey(BlockState state, float yaw, float pitch) {
+    }
+
+    /**
+     * The block-local collision shape (0..1, centered on 0.5) of a real block rotated by the
+     * placement yaw/pitch: the base shape's own collision box stepped into a {@value GRID}-wide
+     * voxel grid, so the hitbox visibly matches the rotated render. Identity rotation returns
+     * the base shape unchanged; results are cached per (block state, yaw, pitch).
+     */
+    public static VoxelShape rotatedShape(BlockState state, VoxelShape base, float yawDeg, float pitchDeg) {
+        if (base.isEmpty()) {
+            return Shapes.empty();
+        }
+        if (yawDeg == 0.0f && pitchDeg == 0.0f) {
+            return base;
+        }
+        ShapeKey key = new ShapeKey(state, yawDeg, pitchDeg);
+        VoxelShape cached = SHAPE_CACHE.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        Quaternionf rot = rotation(yawDeg, pitchDeg);
+        Quaternionf inv = new Quaternionf(rot).conjugate();
+        AABB bounds = base.bounds();
+        VoxelShape result = Shapes.empty();
+        double step = 1.0 / GRID;
+        for (int i = 0; i < GRID; i++) {
+            for (int j = 0; j < GRID; j++) {
+                for (int k = 0; k < GRID; k++) {
+                    // Cell center in block-local coords; map into the model's own space by the
+                    // inverse rotation around the center (0.5, 0.5, 0.5).
+                    float cx = (float) ((i + 0.5) * step - HALF);
+                    float cy = (float) ((j + 0.5) * step - HALF);
+                    float cz = (float) ((k + 0.5) * step - HALF);
+                    Vector3f v = inv.transform(new Vector3f(cx, cy, cz), new Vector3f());
+                    if (bounds.contains(v.x + HALF, v.y + HALF, v.z + HALF)) {
+                        result = Shapes.or(result, Shapes.box(
+                                i * step, j * step, k * step,
+                                (i + 1) * step, (j + 1) * step, (k + 1) * step));
+                    }
+                }
+            }
+        }
+        if (result.isEmpty()) {
+            result = Shapes.box(0, 0, 0, 1, 1, 1); // safety: never an empty hitbox for a solid block
+        }
+        SHAPE_CACHE.put(key, result);
+        return result;
     }
 }

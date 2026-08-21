@@ -1,15 +1,18 @@
 package net.buildertools.network;
 
 import net.buildertools.BuilderToolsMod;
+import net.buildertools.network.packet.BlockRotationPacket;
 import net.buildertools.network.packet.EntityDeletePacket;
 import net.buildertools.network.packet.EntityDuplicatePacket;
 import net.buildertools.network.packet.EntityFreezePacket;
 import net.buildertools.network.packet.EntitySpawnPacket;
 import net.buildertools.network.packet.EntityTransformPacket;
+import net.buildertools.network.packet.FreeBlockBreakPacket;
 import net.buildertools.network.packet.OffGridBlockPacket;
 import net.buildertools.network.packet.PaintPacket;
 import net.buildertools.network.packet.PastePacket;
 import net.buildertools.network.packet.PlayerAbilitiesPacket;
+import net.buildertools.network.packet.RotationSyncPacket;
 import net.buildertools.network.packet.ScatterPacket;
 import net.buildertools.network.packet.SelectionCopyPacket;
 import net.buildertools.network.packet.SelectionFillPacket;
@@ -45,6 +48,8 @@ public final class ModPackets {
                 flow.add(EntityTransformPacket.class, EntityTransformPacket.STREAM_CODEC.cast(), EntityTransformPacket::handle);
                 flow.add(EntitySpawnPacket.class, EntitySpawnPacket.STREAM_CODEC.cast(), EntitySpawnPacket::handle);
                 flow.add(OffGridBlockPacket.class, OffGridBlockPacket.STREAM_CODEC.cast(), OffGridBlockPacket::handle);
+                flow.add(BlockRotationPacket.class, BlockRotationPacket.STREAM_CODEC.cast(), BlockRotationPacket::handle);
+                flow.add(FreeBlockBreakPacket.class, FreeBlockBreakPacket.STREAM_CODEC.cast(), FreeBlockBreakPacket::handle);
                 flow.add(EntityDeletePacket.class, EntityDeletePacket.STREAM_CODEC.cast(), EntityDeletePacket::handle);
                 flow.add(EntityDuplicatePacket.class, EntityDuplicatePacket.STREAM_CODEC.cast(), EntityDuplicatePacket::handle);
                 flow.add(PaintPacket.class, PaintPacket.STREAM_CODEC.cast(), PaintPacket::handle);
@@ -59,6 +64,7 @@ public final class ModPackets {
             })
             .clientbound()
             .add(SelectionSyncPacket.class, SelectionSyncPacket.STREAM_CODEC.cast(), SelectionSyncPacket::handleClient)
+            .add(RotationSyncPacket.class, RotationSyncPacket.STREAM_CODEC.cast(), RotationSyncPacket::handle)
             .build();
 
     private ModPackets() {

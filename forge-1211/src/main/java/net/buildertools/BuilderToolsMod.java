@@ -3,6 +3,7 @@ package net.buildertools;
 import net.buildertools.client.ClientEvents;
 import net.buildertools.client.KeyBindings;
 import net.buildertools.client.OffGridBlockRenderer;
+import net.buildertools.client.RotatedBlockRenderer;
 import net.buildertools.client.SelectionRenderer;
 import net.buildertools.network.ModPackets;
 import net.buildertools.registry.ModEntities;
@@ -39,6 +40,7 @@ public class BuilderToolsMod {
             modEventBus.addListener(this::registerRenderers);
             MinecraftForge.EVENT_BUS.register(ClientEvents.class);
             MinecraftForge.EVENT_BUS.register(SelectionRenderer.class);
+            MinecraftForge.EVENT_BUS.register(RotatedBlockRenderer.class);
         }
     }
 

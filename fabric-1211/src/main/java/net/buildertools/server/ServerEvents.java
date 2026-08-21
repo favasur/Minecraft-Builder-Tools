@@ -59,6 +59,7 @@ public final class ServerEvents {
                     // so a cell does not end up with both a grid block and its off-grid display.
                     BlockPos cell = hitResult.getBlockPos().relative(hitResult.getDirection());
                     if (BuilderServerHandler.isRecentOffGridPlacement(player, cell)
+                            || RotationStore.hasRotation(level, cell)
                             || BuilderServerHandler.findOffGrid(level, cell) != null
                             || BuilderServerHandler.vanillaPlacementOverlapsOffGrid(level, cell)) {
                         return InteractionResult.FAIL;
@@ -99,6 +100,13 @@ public final class ServerEvents {
             }
             // Keeps the day/night cycle frozen while "Pause Time" is enabled in the Creative Settings.
             BuilderServerHandler.tickPausedLevels(server);
+        });
+
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
+            if (handler.getPlayer() instanceof ServerPlayer serverPlayer) {
+                // Send the rotation layer so every rotated block renders rotated on this client.
+                RotationStore.syncAllTo(serverPlayer);
+            }
         });
 
         ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {

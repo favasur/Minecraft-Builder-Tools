@@ -1,14 +1,17 @@
 package net.buildertools.network;
 
+import net.buildertools.network.packet.BlockRotationPacket;
 import net.buildertools.network.packet.EntityDeletePacket;
 import net.buildertools.network.packet.EntityDuplicatePacket;
 import net.buildertools.network.packet.EntityFreezePacket;
 import net.buildertools.network.packet.EntitySpawnPacket;
 import net.buildertools.network.packet.EntityTransformPacket;
+import net.buildertools.network.packet.FreeBlockBreakPacket;
 import net.buildertools.network.packet.OffGridBlockPacket;
 import net.buildertools.network.packet.PaintPacket;
 import net.buildertools.network.packet.PastePacket;
 import net.buildertools.network.packet.PlayerAbilitiesPacket;
+import net.buildertools.network.packet.RotationSyncPacket;
 import net.buildertools.network.packet.ScatterPacket;
 import net.buildertools.network.packet.SelectionCopyPacket;
 import net.buildertools.network.packet.SelectionFillPacket;
@@ -44,9 +47,12 @@ public final class ModPackets {
         PayloadTypeRegistry.playC2S().register(WorldSettingsPacket.TYPE, WorldSettingsPacket.STREAM_CODEC);
         PayloadTypeRegistry.playC2S().register(PlayerAbilitiesPacket.TYPE, PlayerAbilitiesPacket.STREAM_CODEC);
         PayloadTypeRegistry.playC2S().register(EntityFreezePacket.TYPE, EntityFreezePacket.STREAM_CODEC);
+        PayloadTypeRegistry.playC2S().register(BlockRotationPacket.TYPE, BlockRotationPacket.STREAM_CODEC);
+        PayloadTypeRegistry.playC2S().register(FreeBlockBreakPacket.TYPE, FreeBlockBreakPacket.STREAM_CODEC);
 
-        // Server -> client codecs (selection sync after expand/contract/shift).
+        // Server -> client codecs (selection sync after expand/contract/shift + rotation layer).
         PayloadTypeRegistry.playS2C().register(SelectionSyncPacket.TYPE, SelectionSyncPacket.STREAM_CODEC);
+        PayloadTypeRegistry.playS2C().register(RotationSyncPacket.TYPE, RotationSyncPacket.STREAM_CODEC);
 
         // Server receivers.
         ServerPlayNetworking.registerGlobalReceiver(SelectionFillPacket.TYPE, SelectionFillPacket::handle);
@@ -64,9 +70,12 @@ public final class ModPackets {
         ServerPlayNetworking.registerGlobalReceiver(WorldSettingsPacket.TYPE, WorldSettingsPacket::handle);
         ServerPlayNetworking.registerGlobalReceiver(PlayerAbilitiesPacket.TYPE, PlayerAbilitiesPacket::handle);
         ServerPlayNetworking.registerGlobalReceiver(EntityFreezePacket.TYPE, EntityFreezePacket::handle);
+        ServerPlayNetworking.registerGlobalReceiver(BlockRotationPacket.TYPE, BlockRotationPacket::handle);
+        ServerPlayNetworking.registerGlobalReceiver(FreeBlockBreakPacket.TYPE, FreeBlockBreakPacket::handle);
         // Two-way: client -> server keeps the command store in sync, server -> client applies
         // expand/contract/shift.
         ServerPlayNetworking.registerGlobalReceiver(SelectionSyncPacket.TYPE, SelectionSyncPacket::handleServer);
         ClientPlayNetworking.registerGlobalReceiver(SelectionSyncPacket.TYPE, SelectionSyncPacket::handleClient);
+        ClientPlayNetworking.registerGlobalReceiver(RotationSyncPacket.TYPE, RotationSyncPacket::handleClient);
     }
 }

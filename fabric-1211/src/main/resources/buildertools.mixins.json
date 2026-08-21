@@ -9,7 +9,11 @@
     "MouseHandlerMixin",
     "ItemRendererMixin",
     "DisplayAccessor",
-    "BlockDisplayAccessor"
+    "BlockDisplayAccessor",
+    "BlockGetterMixin",
+    "CollisionGetterMixin",
+    "LevelMixin",
+    "ClientPlayerInteractionManagerMixin"
   ],
   "injectors": {
     "defaultRequire": 1

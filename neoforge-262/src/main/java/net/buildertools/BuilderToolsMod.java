@@ -3,6 +3,7 @@ package net.buildertools;
 import net.buildertools.client.ClientEvents;
 import net.buildertools.client.KeyBindings;
 import net.buildertools.client.OffGridBlockRenderer;
+import net.buildertools.client.RotatedBlockRenderer;
 import net.buildertools.client.SelectionRenderer;
 import net.buildertools.network.ModPackets;
 import net.buildertools.registry.ModEntities;
@@ -37,6 +38,7 @@ public class BuilderToolsMod {
             modEventBus.addListener(EntityRenderersEvent.RegisterRenderers.class, event ->
                     event.registerEntityRenderer(ModEntities.OFF_GRID_BLOCK.get(), OffGridBlockRenderer::new));
             modEventBus.addListener(SelectionRenderer::register);
+            modEventBus.addListener(RotatedBlockRenderer::register);
             NeoForge.EVENT_BUS.register(ClientEvents.class);
         }
     }

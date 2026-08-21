@@ -3,6 +3,7 @@ package net.buildertools;
 import net.buildertools.client.ClientEvents;
 import net.buildertools.client.KeyBindings;
 import net.buildertools.client.OffGridBlockRenderer;
+import net.buildertools.client.RotatedBlockRenderer;
 import net.buildertools.client.SelectionRenderer;
 import net.buildertools.registry.ModEntities;
 import net.fabricmc.api.ClientModInitializer;
@@ -17,5 +18,6 @@ public class BuilderToolsModClient implements ClientModInitializer {
         EntityRendererRegistry.register(ModEntities.OFF_GRID_BLOCK, OffGridBlockRenderer::new);
         ClientEvents.register();
         SelectionRenderer.register();
+        RotatedBlockRenderer.register();
     }
 }

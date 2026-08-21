@@ -1,14 +1,17 @@
 package net.buildertools.network;
 
+import net.buildertools.network.packet.BlockRotationPacket;
 import net.buildertools.network.packet.EntityDeletePacket;
 import net.buildertools.network.packet.EntityDuplicatePacket;
 import net.buildertools.network.packet.EntityFreezePacket;
 import net.buildertools.network.packet.EntitySpawnPacket;
 import net.buildertools.network.packet.EntityTransformPacket;
+import net.buildertools.network.packet.FreeBlockBreakPacket;
 import net.buildertools.network.packet.OffGridBlockPacket;
 import net.buildertools.network.packet.PaintPacket;
 import net.buildertools.network.packet.PastePacket;
 import net.buildertools.network.packet.PlayerAbilitiesPacket;
+import net.buildertools.network.packet.RotationSyncPacket;
 import net.buildertools.network.packet.ScatterPacket;
 import net.buildertools.network.packet.SelectionCopyPacket;
 import net.buildertools.network.packet.SelectionFillPacket;
@@ -34,6 +37,8 @@ public final class ModPackets {
         PayloadTypeRegistry.serverboundPlay().register(EntityTransformPacket.TYPE, EntityTransformPacket.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(EntitySpawnPacket.TYPE, EntitySpawnPacket.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(OffGridBlockPacket.TYPE, OffGridBlockPacket.STREAM_CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(BlockRotationPacket.TYPE, BlockRotationPacket.STREAM_CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(FreeBlockBreakPacket.TYPE, FreeBlockBreakPacket.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(EntityDeletePacket.TYPE, EntityDeletePacket.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(EntityDuplicatePacket.TYPE, EntityDuplicatePacket.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(PaintPacket.TYPE, PaintPacket.STREAM_CODEC);
@@ -45,8 +50,9 @@ public final class ModPackets {
         PayloadTypeRegistry.serverboundPlay().register(PlayerAbilitiesPacket.TYPE, PlayerAbilitiesPacket.STREAM_CODEC);
         PayloadTypeRegistry.serverboundPlay().register(EntityFreezePacket.TYPE, EntityFreezePacket.STREAM_CODEC);
 
-        // Server -> client codecs (selection sync after expand/contract/shift).
+        // Server -> client codecs (selection sync after expand/contract/shift, rotation layer sync).
         PayloadTypeRegistry.clientboundPlay().register(SelectionSyncPacket.TYPE, SelectionSyncPacket.STREAM_CODEC);
+        PayloadTypeRegistry.clientboundPlay().register(RotationSyncPacket.TYPE, RotationSyncPacket.STREAM_CODEC);
 
         // Server receivers.
         ServerPlayNetworking.registerGlobalReceiver(SelectionFillPacket.TYPE, SelectionFillPacket::handle);
@@ -54,6 +60,8 @@ public final class ModPackets {
         ServerPlayNetworking.registerGlobalReceiver(PastePacket.TYPE, PastePacket::handle);
         ServerPlayNetworking.registerGlobalReceiver(EntityTransformPacket.TYPE, EntityTransformPacket::handle);
         ServerPlayNetworking.registerGlobalReceiver(OffGridBlockPacket.TYPE, OffGridBlockPacket::handle);
+        ServerPlayNetworking.registerGlobalReceiver(BlockRotationPacket.TYPE, BlockRotationPacket::handle);
+        ServerPlayNetworking.registerGlobalReceiver(FreeBlockBreakPacket.TYPE, FreeBlockBreakPacket::handle);
         ServerPlayNetworking.registerGlobalReceiver(EntityDeletePacket.TYPE, EntityDeletePacket::handle);
         ServerPlayNetworking.registerGlobalReceiver(EntityDuplicatePacket.TYPE, EntityDuplicatePacket::handle);
         ServerPlayNetworking.registerGlobalReceiver(PaintPacket.TYPE, PaintPacket::handle);
@@ -68,5 +76,6 @@ public final class ModPackets {
         // expand/contract/shift.
         ServerPlayNetworking.registerGlobalReceiver(SelectionSyncPacket.TYPE, SelectionSyncPacket::handleServer);
         ClientPlayNetworking.registerGlobalReceiver(SelectionSyncPacket.TYPE, SelectionSyncPacket::handleClient);
+        ClientPlayNetworking.registerGlobalReceiver(RotationSyncPacket.TYPE, RotationSyncPacket::handleClient);
     }
 }
