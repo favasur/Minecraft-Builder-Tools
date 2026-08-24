@@ -13,6 +13,12 @@ base {
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
+sourceSets {
+    main {
+        java.srcDir('../shared/flexiblepainting-1211/src/main/java')
+    }
+}
+
 minecraft {
     mappings channel: 'official', version: minecraft_version
 
@@ -54,12 +60,13 @@ dependencies {
 mixin {
     add sourceSets.main, 'buildertools.refmap.json'
     config 'buildertools.mixins.json'
+    config 'buildertools.flexiblepainting.mixins.json'
 }
 
 // Expand ${...} placeholders in mods.toml at build time.
 tasks.withType(ProcessResources).configureEach {
     var replaceProperties = [
-            minecraft_version_range: "[1.21.1]",
+            minecraft_version_range: "[1.21.1,1.22)",
             forge_version          : forge_version,
             loader_version_range   : loader_version_range,
             mod_id                 : mod_id,

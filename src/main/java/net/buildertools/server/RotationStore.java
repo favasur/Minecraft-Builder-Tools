@@ -7,6 +7,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -41,23 +42,27 @@ public final class RotationStore {
 
     /** Sets (or updates) the rotated block in a cell and pushes it to every client. */
     public static void set(ServerLevel level, BlockPos pos, RotationData data) {
-        System.out.println("[BuilderTools] RotationStore.set " + pos + " yaw=" + data.yaw() + " pitch=" + data.pitch());
+        Vec3 c = data.center(pos);
+        System.out.println("[BuilderTools] RotationStore.set " + pos + " center=(" + c.x + "," + c.y + "," + c.z
+                + ") yaw=" + data.yaw() + " pitch=" + data.pitch());
         RotationSavedData.of(level).set(pos, data);
-        broadcast(level, new RotationSyncPacket(pos, data.state(), data.yaw(), data.pitch(), data.billboard(), false));
+        broadcast(level, new RotationSyncPacket(pos, data.state(), data.yaw(), data.pitch(), data.billboard(), false,
+                c.x, c.y, c.z));
     }
 
     /** Removes the rotated block from a cell (its block is being broken or replaced). */
     public static void remove(ServerLevel level, BlockPos pos) {
         if (RotationSavedData.of(level).remove(pos)) {
-            broadcast(level, new RotationSyncPacket(pos, null, 0.0f, 0.0f, false, true));
+            broadcast(level, new RotationSyncPacket(pos, null, 0.0f, 0.0f, false, true, 0.0, 0.0, 0.0));
         }
     }
 
     /** Sends the whole layer to a player (on world join). */
     public static void syncAllTo(ServerPlayer player) {
         for (Map.Entry<BlockPos, RotationData> e : RotationSavedData.of(player.serverLevel()).all().entrySet()) {
+            Vec3 c = e.getValue().center(e.getKey());
             player.connection.send(new RotationSyncPacket(e.getKey(), e.getValue().state(), e.getValue().yaw(),
-                    e.getValue().pitch(), e.getValue().billboard(), false));
+                    e.getValue().pitch(), e.getValue().billboard(), false, c.x, c.y, c.z));
         }
     }
 
@@ -83,22 +88,21 @@ public final class RotationStore {
      * pre-filter, then the tight rotated bounding box). Used by the collision and raycast hooks.
      */
     public static List<Map.Entry<BlockPos, RotationData>> getInBox(BlockGetter level, AABB box) {
-        AABB pre = box.inflate(1.0);
+        // Do not pre-filter by the center alone. A rotated model (and especially a block with a
+        // model offset or a custom model extending outside 0..1) can intersect the query while
+        // its pivot is outside the old two-block center window. The rotated broadphase below is
+        // deliberately conservative; the exact triangle/shape test still decides the hit.
         List<Map.Entry<BlockPos, RotationData>> result = new ArrayList<>();
         if (level instanceof ServerLevel serverLevel) {
             for (Map.Entry<BlockPos, RotationData> e : RotationSavedData.of(serverLevel).all().entrySet()) {
-                if (pre.contains(e.getKey().getX() + 0.5, e.getKey().getY() + 0.5, e.getKey().getZ() + 0.5)) {
-                    if (rotatedBounds(level, e).intersects(box)) {
-                        result.add(e);
-                    }
+                if (rotatedBounds(e).intersects(box)) {
+                    result.add(e);
                 }
             }
         } else {
             for (Map.Entry<BlockPos, RotationData> e : CLIENT.entrySet()) {
-                if (pre.contains(e.getKey().getX() + 0.5, e.getKey().getY() + 0.5, e.getKey().getZ() + 0.5)) {
-                    if (rotatedBounds(level, e).intersects(box)) {
-                        result.add(e);
-                    }
+                if (rotatedBounds(e).intersects(box)) {
+                    result.add(e);
                 }
             }
         }
@@ -110,13 +114,18 @@ public final class RotationStore {
         return new ArrayList<>(CLIENT.entrySet());
     }
 
-    private static AABB rotatedBounds(BlockGetter level, Map.Entry<BlockPos, RotationData> e) {
+    private static AABB rotatedBounds(Map.Entry<BlockPos, RotationData> e) {
         BlockPos pos = e.getKey();
         RotationData data = e.getValue();
-        AABB shape = data.state().getCollisionShape(level, pos).bounds();
+        Vec3 c = data.center(pos);
+        // This is only a broadphase test. Use a conservative model envelope, not the collision or
+        // outline accessor: during Entity#collide smoothable states intentionally return an empty
+        // per-cell shape, and custom blocks can render beyond the vanilla 0..1 cell. The envelope
+        // also includes normal model offsets, so the exact triangle test cannot be skipped at a
+        // protruding corner.
+        AABB modelCell = new AABB(-1.0, -1.0, -1.0, 2.0, 2.0, 2.0);
         return net.buildertools.util.OffGridTransform.boxAround(
-                pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
-                data.yaw(), data.pitch(), shape);
+                c.x, c.y, c.z, data.yaw(), data.pitch(), modelCell);
     }
 
     public static void clearClient() {

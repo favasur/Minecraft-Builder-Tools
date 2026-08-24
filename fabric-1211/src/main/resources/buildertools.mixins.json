@@ -3,6 +3,7 @@
   "minVersion": "0.8",
   "package": "net.buildertools.mixin",
   "compatibilityLevel": "JAVA_21",
+  "plugin": "net.buildertools.mixin.BuilderToolsMixinPlugin",
   "mixins": [
     "PlayerMixin",
     "LocalPlayerMixin",
@@ -12,6 +13,7 @@
     "BlockDisplayAccessor",
     "BlockGetterMixin",
     "CollisionGetterMixin",
+    "ServerGamePacketListenerImplMixin",
     "LevelMixin",
     "ClientPlayerInteractionManagerMixin"
   ],

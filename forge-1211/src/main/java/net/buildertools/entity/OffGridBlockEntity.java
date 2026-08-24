@@ -184,9 +184,16 @@ public class OffGridBlockEntity extends Entity {
         return new Vec3(box.getCenter().x, box.minY, box.getCenter().z);
     }
 
+    /**
+     * Never collide via the entity's own axis-aligned bounding box. An entity can only have ONE
+     * axis-aligned box, which would poke out past the rotated model at the corners (the invisible
+     * wall the player used to hit). The rotated voxel shape is injected into the block-collision
+     * queries by {@link net.buildertools.mixin.CollisionGetterMixin} instead, so the player stops
+     * exactly at the visible rotated faces.
+     */
     @Override
     public boolean canBeCollidedWith() {
-        return this.isSolidCollidable();
+        return false;
     }
 
     @Override

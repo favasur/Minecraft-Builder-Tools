@@ -10,7 +10,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
-import net.minecraft.client.renderer.texture.OverlayTexture;
+import net.minecraft.client.resources.model.BakedModel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.RenderShape;
@@ -29,14 +29,16 @@ import java.util.Map;
 
 /**
  * Draws the mod's rotated blocks with FULL block shading every frame (the PlaceAnywhere
- * technique): instead of mixing into the chunk compiler, each rotated block's real model is
- * rendered through the vanilla block pipeline with the pose stack rotated around the cell center,
- * so the block keeps its textures, shading and ambient occlusion while spinning in place. The cell
- * itself stays air - this renderer IS the block's visual.
+ * technique): instead of mixing into the chunk compiler, each rotated block's model is pre-rotated
+ * by {@link RotatedBlockModel} (quads carry world-space face directions) and rendered with
+ * continuous per-face shading and per-corner world light via {@link RotatedBlockRendering}, so
+ * every face gets the shade its true orientation deserves (exactly vanilla's 1.0/0.8/0.6/0.5 for
+ * axis-aligned faces, smooth for tilted ones) and the sky/block light from its real-world
+ * neighbors - the block keeps its textures while blending with the surrounding blocks from any
+ * viewing angle. The cell itself stays air - this renderer IS the block's visual.
  *
- * <p>Rendered at the {@link RenderLevelStageEvent.Stage#AFTER_LEVEL} stage with the same pose
- * stack and {@code renderSingleBlock} call the off-grid placement preview uses (which is proven to
- * work), so the placed block looks exactly like the preview that placed it. A dark-blue rotated
+ * <p>Rendered at the {@link RenderLevelStageEvent.Stage#AFTER_LEVEL} stage, so the placed block
+ * looks exactly like the placement preview (which renders the same way). A dark-blue rotated
  * outline shows the block under the cursor.
  */
 @OnlyIn(Dist.CLIENT)
@@ -72,7 +74,7 @@ public final class RotatedBlockRenderer {
         for (Map.Entry<BlockPos, RotationData> e : RotationStore.clientEntries()) {
             BlockPos pos = e.getKey();
             RotationData rot = e.getValue();
-            Vec3 center = Vec3.atCenterOf(pos);
+            Vec3 center = rot.center(pos);
             if (camera.distanceToSqr(center) > range) {
                 continue;
             }
@@ -82,6 +84,7 @@ public final class RotatedBlockRenderer {
             }
             // Billboard blocks always face the player (Hytale), like the placement preview.
             Quaternionf quat;
+            BakedModel rotatedModel;
             if (rot.billboard()) {
                 double dx = center.x - camera.x;
                 double dy = center.y - camera.y;
@@ -90,40 +93,44 @@ public final class RotatedBlockRenderer {
                 float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
                 float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.max(h, 1.0E-4)));
                 quat = OffGridTransform.rotation(yaw, pitch);
+                rotatedModel = RotatedBlockModel.build(state, quat);
             } else {
                 quat = OffGridTransform.rotation(rot.yaw(), rot.pitch());
+                rotatedModel = RotatedBlockModel.get(state, rot.yaw(), rot.pitch());
             }
 
             poseStack.pushPose();
-            // Same transform the placement preview uses: translate to the cell, rotate the model
-            // around the cell center (0.5, 0.5, 0.5) so it spins in place. The base pose stack
-            // already maps world -> camera space, so the cell corner goes in as WORLD coordinates
-            // (no camera subtraction - that would double-offset every block by the camera pos).
-            poseStack.translate(pos.getX(), pos.getY(), pos.getZ());
-            poseStack.translate(0.5f, 0.5f, 0.5f);
-            poseStack.mulPose(quat);
-            poseStack.translate(-0.5f, -0.5f, -0.5f);
-            minecraft.getBlockRenderer().renderSingleBlock(
-                    state, poseStack, buffers,
-                    LevelRenderer.getLightColor(minecraft.level, pos),
-                    OverlayTexture.NO_OVERLAY);
+            // The model geometry is pre-rotated around its center (see RotatedBlockModel), so the
+            // pose only places the local 0..1 model box at the exact model center (fractional for
+            // blocks snapped onto a rotated neighbor's grid). The base pose stack already maps
+            // world -> camera space, so the center goes in as WORLD coordinates.
+            poseStack.translate(center.x - 0.5, center.y - 0.5, center.z - 0.5);
+            // Render the rotated geometry with per-face shading that follows the block's true
+            // world-space orientation (see RotatedBlockRendering) instead of the vanilla
+            // axis-quantized pipeline, so the rotated block blends with its surroundings from any
+            // viewing angle instead of reading darker than the blocks around it.
+            if (rotatedModel != null) {
+                VertexConsumer consumer = buffers.getBuffer(
+                        net.minecraft.client.renderer.ItemBlockRenderTypes.getRenderType(state, false));
+                RotatedBlockRendering.render(rotatedModel, state, pos, center, poseStack, consumer,
+                        minecraft.level);
+            }
             poseStack.popPose();
 
             // Rotated outline for the block under the cursor.
             if (aimed != null && aimed.cell().equals(pos)) {
-                drawRotatedOutline(poseStack, buffers, pos, quat, state, camera);
+                drawRotatedOutline(poseStack, buffers, center, quat, state);
             }
         }
         buffers.endBatch();
     }
 
-    /** Draws the 12 edges of the block's own shape bounds rotated around the cell center. */
+    /** Draws the 12 edges of the block's own shape bounds rotated around its model center. */
     private static void drawRotatedOutline(PoseStack poseStack, MultiBufferSource.BufferSource buffers,
-                                           BlockPos pos, Quaternionf quat, BlockState state, Vec3 camera) {
-        AABB shape = state.getCollisionShape(Minecraft.getInstance().level, pos).bounds();
+                                           Vec3 center, Quaternionf quat, BlockState state) {
+        AABB shape = state.getCollisionShape(Minecraft.getInstance().level, BlockPos.ZERO).bounds();
         poseStack.pushPose();
-        poseStack.translate(pos.getX(), pos.getY(), pos.getZ());
-        poseStack.translate(0.5f, 0.5f, 0.5f);
+        poseStack.translate(center.x, center.y, center.z);
         poseStack.mulPose(quat);
         poseStack.translate(-0.5f, -0.5f, -0.5f);
         VertexConsumer lines = buffers.getBuffer(RenderType.lines());

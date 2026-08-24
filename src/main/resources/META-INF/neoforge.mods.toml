@@ -13,6 +13,7 @@ WorldEdit-style builder tools for Minecraft (NeoForge 1.21.1).
 Includes:
 - Selection Tool: mark two corners with left/right click, see the region rendered in-world, then copy / paste / fill / undo.
 - Entity Tool: right-click an entity to select it, then move (scroll), nudge up/down (sneak+scroll), rotate, teleport to a block, duplicate or delete it.
+- Flexible Painting: paintings can be placed on walls, floors, and ceilings.
 
 All operations are server-validated and work in single player and multiplayer.
 '''
@@ -22,6 +23,38 @@ config="buildertools.mixins.json"
 
 [[mixins]]
 config="smoothterrain.mixins.json"
+
+[[mixins]]
+config="fullslabs.mixins.json"
+
+[[mixins]]
+config="fullslabs.neoforge.mixins.json"
+
+[[mixins]]
+config="buildertools.flexiblepainting.mixins.json"
+
+[[mods]]
+modId="fullslabs"
+version="${mod_version}"
+displayName="FullSlabs"
+authors="Micalobia; ported by Builder Tools contributors"
+description='''
+Vertical and mixed slabs for every slab block in the game (vanilla and other mods), ported from FullSlabs 4.0.3 to NeoForge 1.21.1.
+'''
+
+[[dependencies.fullslabs]]
+modId="neoforge"
+type="required"
+versionRange="[${neo_version},)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.fullslabs]]
+modId="minecraft"
+type="required"
+versionRange="${minecraft_version_range}"
+ordering="NONE"
+side="BOTH"
 
 [[dependencies.${mod_id}]]
 modId="neoforge"

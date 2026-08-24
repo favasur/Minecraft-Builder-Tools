@@ -18,7 +18,8 @@
     ]
   },
   "mixins": [
-    "buildertools.mixins.json"
+    "buildertools.mixins.json",
+    "buildertools.flexiblepainting.mixins.json"
   ],
   "depends": {
     "fabricloader": ">=0.19.0",

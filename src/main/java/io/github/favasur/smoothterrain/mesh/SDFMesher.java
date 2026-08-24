@@ -34,6 +34,11 @@ abstract class SDFMesher implements Mesher {
 		this.smoothness2x = smoothness2x;
 	}
 
+	@Override
+	public String cacheId() {
+		return Mesher.super.cacheId() + (smoothness2x ? ":2x" : "");
+	}
+
 	protected static BlockPos getDimensions(Area area, boolean smoother, @Nullable TestMesh testMesh) {
 		return testMesh == null ? getDimensions(area, smoother) : testMesh.dimensions;
 	}

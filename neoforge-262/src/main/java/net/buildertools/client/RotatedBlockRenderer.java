@@ -70,7 +70,7 @@ public final class RotatedBlockRenderer implements DebugRenderer.SimpleDebugRend
         for (Map.Entry<BlockPos, RotationData> e : RotationStore.clientEntries()) {
             BlockPos pos = e.getKey();
             RotationData rot = e.getValue();
-            Vec3 center = Vec3.atCenterOf(pos);
+            Vec3 center = rot.center(pos);
             if (camera.distanceToSqr(center) > range) {
                 continue;
             }

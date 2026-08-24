@@ -23,6 +23,9 @@ public class RenderHelper {
 
 	public static void reloadAllChunks(String because, Object... becauseArgs) {
 		LOG.debug(() -> "Re-rendering chunks because " + because.formatted(becauseArgs));
+		// Config/mesher/smoothable changes invalidate every cached mesh; the next render/collision
+		// query rebuilds them from the current world state.
+		io.github.favasur.smoothterrain.mesh.MeshCache.clear();
 		var minecraft = Minecraft.getInstance();
 		minecraft.execute(minecraft.levelRenderer::allChanged);
 	}

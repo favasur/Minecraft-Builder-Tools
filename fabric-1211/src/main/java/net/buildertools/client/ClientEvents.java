@@ -57,6 +57,7 @@ import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.List;
@@ -70,6 +71,13 @@ import java.util.Optional;
  */
 public final class ClientEvents {
     private ClientEvents() {
+    }
+
+    static {
+        // Load the client model-shape provider: it registers itself as the source of the
+        // rendered-model base shape for the rotated-block collision voxelization, so rotated
+        // stairs/fences collide with the same detail the player sees.
+        ModelShapeProvider.ensureLoaded();
     }
 
     public static void register() {
@@ -155,25 +163,37 @@ public final class ClientEvents {
                     if (BlockRotateState.isActive()) {
                         BlockPos cell = BlockRotateState.getTarget();
                         if (cell != null) {
-                            ClientPackets.sendToServer(new BlockRotationPacket(
-                                    cell, BlockRotateState.getYawDeg(), BlockRotateState.getPitchDeg(),
-                                    BlockRotateState.isBillboard()));
+                            Vec3 center = BlockRotateState.getCenter();
+                            sendBlockRotation(BlockPos.containing(center), center,
+                                    BlockRotateState.getYawDeg(), BlockRotateState.getPitchDeg(),
+                                    BlockRotateState.isBillboard());
                         }
                         BlockRotateState.stop();
                         player.playSound(ModSounds.SET_CORNER_1, 1.0f, 1.0f);
                     } else {
-                        // 1) Aiming at an off-grid BLOCK (the vanilla raycast hits it - it is a
-                        // real block): place into the adjacent grid cell, inheriting the clicked
-                        // block's rotation - adjacency works exactly like normal blocks.
+                        // 1) Aiming at a rotated LAYER block: place the next block FLUSH against
+                        // the clicked rotated face, one unit along the neighbor's OWN rotated
+                        // axis (the ray transformed into its local frame tells which face was
+                        // clicked), inheriting its rotation - clicking the same face again keeps
+                        // building the continuous rotated plane (PlaceAnywhere-style).
                         OffGridHit ogHit = raycastOffGridHit(player, 6.0);
                         if (ogHit != null && ogHit.isBlock()) {
-                            BlockPos adj = ogHit.cell().relative(ogHit.face());
                             float[] rot = rotationOfBlock(player.level(), ogHit.cell());
-                            if (rot != null && canPlaceOffGridBlock(player, adj)) {
-                                ClientPackets.sendToServer(new BlockRotationPacket(
-                                        adj, rot[0], rot[1], rot[2] == 1.0f));
-                                player.playSound(ModSounds.SET_CORNER_1, 1.0f, 1.0f);
-                                return InteractionResult.FAIL;
+                            Vec3 neighborCenter = centerOfBlock(player.level(), ogHit.cell());
+                            if (rot != null) {
+                                Vec3 offset = OffGridTransform.rotatedGridOffset(
+                                        OffGridTransform.rotation(rot[0], rot[1]), neighborCenter,
+                                        stateBoundsOfBlock(player.level(), ogHit.cell()),
+                                        player.getEyePosition(1.0f), player.getLookAngle());
+                                if (offset != null) {
+                                    Vec3 newCenter = neighborCenter.add(offset);
+                                    BlockPos newCell = BlockPos.containing(newCenter);
+                                    if (canPlaceRotatedGridBlock(player, newCell, newCenter, rot[0], rot[1])) {
+                                        sendBlockRotation(newCell, newCenter, rot[0], rot[1], rot[2] == 1.0f);
+                                        player.playSound(ModSounds.SET_CORNER_1, 1.0f, 1.0f);
+                                        return InteractionResult.FAIL;
+                                    }
+                                }
                             }
                         } else if (ogHit != null && ogHit.distSq < eyeDistSq(player, hitResult.getLocation())) {
                             // 1) Legacy off-grid entity (its cell is air, so the vanilla block
@@ -189,16 +209,15 @@ public final class ClientEvents {
                                 return InteractionResult.FAIL;
                             }
                         } else {
-                            // 2) Normal block click: inherit the rotation from an off-grid NEIGHBOR
-                            // only (never the target cell itself, which would re-plant it).
-                            BlockPos cell = hitResult.getBlockPos().relative(hitResult.getDirection());
-                            float[] inherited = findInheritedRotation(player, cell);
-                            if (inherited != null && canPlaceOffGridBlock(player, cell)) {
-                                ClientPackets.sendToServer(new BlockRotationPacket(
-                                        cell, inherited[0], inherited[1], inherited[2] == 1.0f));
-                                player.playSound(ModSounds.SET_CORNER_1, 1.0f, 1.0f);
-                                return InteractionResult.FAIL;
-                            }
+                            // 2) Normal block click: let the vanilla placement proceed - the
+                            // target cell simply receives a plain block. The click is NOT hijacked
+                            // into a rotated placement: a rotated NEIGHBOR (e.g. a block floating
+                            // in the air above the cell) must not silently turn the player's
+                            // normal block into a rotated one, nor make the placement fail when
+                            // the inherited rotation would cut through the neighbor's geometry.
+                            // To keep building a rotated formation, click the rotated block
+                            // itself (branch 1 above extends the plane from its faces).
+                            return InteractionResult.PASS;
                         }
                     }
                 }
@@ -876,6 +895,47 @@ public final class ClientEvents {
         return null;
     }
 
+    /** The exact world-space model center of a rotated block cell (fractional for blocks snapped
+     *  onto a rotated neighbor's grid), or the cell center when the cell has no layer entry. */
+    private static Vec3 centerOfBlock(Level level, BlockPos pos) {
+        RotationData rot = RotationStore.get(level, pos);
+        return rot != null ? rot.center(pos) : Vec3.atCenterOf(pos);
+    }
+
+    /** The cell-local collision-shape bounds (0..1) of the rotated block in the cell. */
+    private static AABB stateBoundsOfBlock(Level level, BlockPos pos) {
+        RotationData rot = RotationStore.get(level, pos);
+        return rot != null ? rot.state().getCollisionShape(level, pos).bounds()
+                : level.getBlockState(pos).getCollisionShape(level, pos).bounds();
+    }
+
+    /** Sends a rotated-block placement carrying the exact world-space model center. */
+    private static void sendBlockRotation(BlockPos cell, Vec3 center, float yaw, float pitch, boolean billboard) {
+        ClientPackets.sendToServer(new BlockRotationPacket(
+                cell, center.x, center.y, center.z, yaw, pitch, billboard));
+    }
+
+    /** Whether a rotated block centered at {@code center} (cell {@code cell}) can be placed: the
+     *  cell must be free and replaceable and the player must not stand inside the model. */
+    private static boolean canPlaceRotatedGridBlock(Player player, BlockPos cell, Vec3 center,
+                                                    float yaw, float pitch) {
+        if (RotationStore.hasRotation(player.level(), cell)) {
+            return false; // already occupied by a rotated block
+        }
+        BlockState existing = player.level().getBlockState(cell);
+        if (!existing.canBeReplaced()) {
+            return false;
+        }
+        ItemStack held = player.getMainHandItem();
+        if (!(held.getItem() instanceof BlockItem blockItem)) {
+            return false;
+        }
+        BlockState state = blockItem.getBlock().defaultBlockState();
+        AABB shape = state.getCollisionShape(player.level(), BlockPos.ZERO).bounds();
+        AABB footprint = OffGridTransform.boxAround(center.x, center.y, center.z, yaw, pitch, shape);
+        return !player.getBoundingBox().intersects(footprint);
+    }
+
     /** The actual block state of a rotated block (the vanilla cell stays air - the state lives
      *  in the mod's layer). */
     private static BlockState representedStateOf(Level level, BlockPos pos) {
@@ -1108,7 +1168,7 @@ public final class ClientEvents {
             return false;
         }
         BlockState state = blockItem.getBlock().defaultBlockState();
-        AABB newShape = state.getCollisionShape(player.level(), BlockPos.ZERO).bounds();
+        VoxelShape newShape = state.getCollisionShape(player.level(), BlockPos.ZERO);
         for (OffGridBlockEntity other : player.level().getEntitiesOfClass(OffGridBlockEntity.class,
                 new AABB(center.x - 2, center.y - 2, center.z - 2,
                         center.x + 2, center.y + 2, center.z + 2))) {
@@ -1119,11 +1179,11 @@ public final class ClientEvents {
                     center.x, center.y, center.z, yaw, pitch, newShape,
                     other.modelCenter().x, other.modelCenter().y, other.modelCenter().z,
                     other.getPlacementYaw(), other.getPlacementPitch(),
-                    other.getRepresentedState().getCollisionShape(player.level(), BlockPos.ZERO).bounds())) {
+                    other.getRepresentedState().getCollisionShape(player.level(), BlockPos.ZERO))) {
                 return false;
             }
         }
-        AABB footprint = OffGridTransform.boxAround(center.x, center.y, center.z, yaw, pitch, newShape);
+        AABB footprint = OffGridTransform.boxAround(center.x, center.y, center.z, yaw, pitch, newShape.bounds());
         return !player.getBoundingBox().intersects(footprint);
     }
 
@@ -1137,6 +1197,47 @@ public final class ClientEvents {
             }
         }
         return null;
+    }
+
+    /**
+     * True when a rotated block centered in {@code cell} with the given rotation would penetrate
+     * another rotated block (a layer entry or a legacy entity). The client-side mirror of the
+     * server's {@code BuilderServerHandler#penetratesRotatedBlock}, so the client can skip (or
+     * fall back from) a placement the server would reject instead of dead-ending on the
+     * "would cut through" error - touching flush along a rotated face is still allowed.
+     */
+    private static boolean wouldPenetrateRotated(Player player, BlockPos cell, float yaw, float pitch) {
+        ItemStack held = player.getMainHandItem();
+        if (!(held.getItem() instanceof BlockItem blockItem)) {
+            return true;
+        }
+        BlockState state = blockItem.getBlock().defaultBlockState();
+        VoxelShape shape = state.getCollisionShape(player.level(), BlockPos.ZERO);
+        Vec3 center = Vec3.atCenterOf(cell);
+        for (java.util.Map.Entry<BlockPos, RotationData> e : RotationStore.clientEntries()) {
+            if (e.getKey().equals(cell)) {
+                continue;
+            }
+            Vec3 oc = e.getValue().center(e.getKey());
+            if (OffGridTransform.modelsOverlap(
+                    center.x, center.y, center.z, yaw, pitch, shape,
+                    oc.x, oc.y, oc.z, e.getValue().yaw(), e.getValue().pitch(),
+                    e.getValue().state().getCollisionShape(player.level(), BlockPos.ZERO))) {
+                return true;
+            }
+        }
+        AABB around = OffGridTransform.boxAround(center.x, center.y, center.z, yaw, pitch, shape.bounds())
+                .inflate(0.5);
+        for (OffGridBlockEntity other : player.level().getEntitiesOfClass(OffGridBlockEntity.class, around)) {
+            Vec3 oc = other.modelCenter();
+            if (OffGridTransform.modelsOverlap(
+                    center.x, center.y, center.z, yaw, pitch, shape,
+                    oc.x, oc.y, oc.z, other.getPlacementYaw(), other.getPlacementPitch(),
+                    other.getRepresentedState().getCollisionShape(player.level(), BlockPos.ZERO))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** The general direction from the player's eye to the block center (used for entity hits). */

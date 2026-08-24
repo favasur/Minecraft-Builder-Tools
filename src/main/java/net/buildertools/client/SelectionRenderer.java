@@ -1,11 +1,7 @@
 package net.buildertools.client;
 
-import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
-import org.joml.Matrix3f;
-import org.joml.Matrix4f;
-import net.buildertools.client.OffGridMining;
 import net.buildertools.entity.OffGridBlockEntity;
 import net.buildertools.item.EntityToolItem;
 import net.buildertools.item.LaserToolItem;
@@ -15,7 +11,11 @@ import net.buildertools.item.ScatterToolItem;
 import net.buildertools.item.SelectionToolItem;
 import net.buildertools.item.SmoothToolItem;
 import net.buildertools.client.settings.BuilderSettings;
+import net.buildertools.server.RotationStore;
+import net.buildertools.util.FreeBlockRaycast;
 import net.buildertools.util.OffGridTransform;
+import net.buildertools.util.RotationData;
+import io.github.favasur.smoothterrain.mesh.MeshCollisionShape;
 import net.buildertools.selection.LaserState;
 import net.buildertools.selection.RulerState;
 import net.buildertools.selection.SelectionHandles;
@@ -38,7 +38,9 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.VoxelShape;
 
+import java.util.List;
 import java.util.Locale;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
@@ -76,7 +78,7 @@ public final class SelectionRenderer {
 
     @SubscribeEvent
     public static void onRenderLevel(RenderLevelStageEvent event) {
-        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_LEVEL) {
+        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_BLOCK_ENTITIES) {
             return;
         }
         Minecraft minecraft = Minecraft.getInstance();
@@ -88,10 +90,10 @@ public final class SelectionRenderer {
         ItemStack held = player.getMainHandItem();
         Item item = held.getItem();
 
-        // In 1.21.1 the AFTER_LEVEL event's pose stack is identity and the shader's model-view
-        // matrix is not the camera view, so build a pose stack that makes world coordinates land
-        // correctly regardless of the current global model-view matrix.
-        PoseStack poseStack = worldPoseStack(event);
+        // The stage pose is identity in 1.21.1; the shader supplies the view matrix.
+        Vec3 cameraPosition = event.getCamera().getPosition();
+        PoseStack poseStack = new PoseStack();
+        poseStack.translate(-cameraPosition.x, -cameraPosition.y, -cameraPosition.z);
         // The RenderLevelStageEvent in 1.21.1 does not expose a buffer source, so draw into the
         // game's shared buffer source (all vanilla batches have already been flushed at this stage).
         MultiBufferSource.BufferSource buffers = minecraft.renderBuffers().bufferSource();
@@ -127,31 +129,6 @@ public final class SelectionRenderer {
         }
 
         buffers.endBatch();
-    }
-
-    /**
-     * Builds a pose stack that transforms world coordinates into the camera view space, cancelling
-     * out whatever model-view matrix the render system currently has so the shapes stay glued to
-     * the world instead of the camera.
-     */
-    private static PoseStack worldPoseStack(RenderLevelStageEvent event) {
-        Vec3 cameraPos = event.getCamera().getPosition();
-        // view = R(camera rotation) * T(-camera position)
-        Matrix4f view = new Matrix4f(event.getModelViewMatrix());
-        view.translate((float) -cameraPos.x, (float) -cameraPos.y, (float) -cameraPos.z);
-
-        Matrix4f global = new Matrix4f(RenderSystem.getModelViewMatrix());
-        Matrix4f poseMatrix;
-        if (global.invert().determinant() != 0.0f) {
-            poseMatrix = global.mul(view);
-        } else {
-            poseMatrix = view;
-        }
-
-        PoseStack poseStack = new PoseStack();
-        poseStack.last().pose().set(poseMatrix);
-        poseStack.last().normal().set(new Matrix3f(poseMatrix));
-        return poseStack;
     }
 
     private static boolean isBrush(Item item) {
@@ -297,10 +274,16 @@ public final class SelectionRenderer {
         // so it stays a "what will I mark next?" cue rather than a general highlight).
         if (showTarget) {
             HitResult hit = Minecraft.getInstance().hitResult;
-            if (hit != null && hit.getType() == HitResult.Type.BLOCK) {
-                BlockPos pos = ((BlockHitResult) hit).getBlockPos();
-                VertexConsumer lines = buffers.getBuffer(RenderType.lines());
-                drawBox(poseStack, lines, new AABB(pos), TARGET_COLOR);
+            if (hit instanceof BlockHitResult blockHit) {
+                BlockPos pos = blockHit.getBlockPos();
+                Minecraft minecraft = Minecraft.getInstance();
+                RotationData rotation = RotationStore.get(minecraft.level, pos);
+                if (rotation != null) {
+                    drawRotatedLaserTarget(poseStack, buffers, rotation, pos,
+                            minecraft.gameRenderer.getMainCamera().getPosition(), TARGET_COLOR);
+                } else {
+                    drawBox(poseStack, buffers.getBuffer(RenderType.lines()), new AABB(pos), TARGET_COLOR);
+                }
             }
         }
     }
@@ -370,18 +353,20 @@ public final class SelectionRenderer {
             }
         }
         if (state != null) {
-            poseStack.pushPose();
-            poseStack.translate(center.x - 0.5, center.y - 0.5, center.z - 0.5);
-            org.joml.Vector3f c = new org.joml.Vector3f(0.5f, 0.5f, 0.5f);
-            org.joml.Vector3f t = new org.joml.Vector3f(c)
-                    .sub(rot.transform(new org.joml.Vector3f(c), new org.joml.Vector3f()));
-            poseStack.translate(t.x, t.y, t.z);
-            poseStack.mulPose(rot);
-            Minecraft.getInstance().getBlockRenderer().renderSingleBlock(
-                    state, poseStack, buffers,
-                    LevelRenderer.getLightColor(player.level(), target),
-                    net.minecraft.client.renderer.texture.OverlayTexture.NO_OVERLAY);
-            poseStack.popPose();
+            RotatedBlockModel rotated = RotatedBlockModel.get(state, yaw, pitch);
+            if (rotated != null) {
+                poseStack.pushPose();
+                // The model geometry is pre-rotated around its center (see RotatedBlockModel), so
+                // the pose only places the local 0..1 model box at the exact model center.
+                poseStack.translate(center.x - 0.5, center.y - 0.5, center.z - 0.5);
+                // Render like the placed blocks (same continuous world-space face shading), so the
+                // preview matches exactly what will be placed.
+                com.mojang.blaze3d.vertex.VertexConsumer consumer = buffers.getBuffer(
+                        net.minecraft.client.renderer.ItemBlockRenderTypes.getRenderType(state, false));
+                RotatedBlockRendering.render(rotated, state, target, center, poseStack, consumer,
+                        player.level());
+                poseStack.popPose();
+            }
         }
     }
 
@@ -426,6 +411,13 @@ public final class SelectionRenderer {
             return;
         }
         float p = Math.max(0.0f, Math.min(1.0f, FreeBlockMining.getProgress()));
+        Minecraft minecraft = Minecraft.getInstance();
+        RotationData rotation = minecraft.level == null ? null : RotationStore.get(minecraft.level, pos);
+        if (rotation != null) {
+            drawRotatedLaserTarget(poseStack, buffers, rotation, pos,
+                    minecraft.gameRenderer.getMainCamera().getPosition(), 0xFFFFFFFF);
+            return;
+        }
         AABB box = new AABB(pos);
         DebugRenderer.renderFilledBox(poseStack, buffers, box, 0.0f, 0.0f, 0.0f, 0.08f + 0.55f * p);
         VertexConsumer lines = buffers.getBuffer(RenderType.lines());
@@ -503,26 +495,95 @@ public final class SelectionRenderer {
     }
 
     private static void renderLaser(PoseStack poseStack, MultiBufferSource.BufferSource buffers, Player player) {
-        // Raycast up to 128 blocks along the player's look direction.
-        HitResult hit = player.pick(128.0, 1.0f, false);
+        // Raycast up to 128 blocks along the player's look direction. The normal level clip is
+        // also patched to see the rotation layer, but keep an explicit result here so the Laser
+        // Tool can draw the exact rendered mesh instead of the vanilla cell AABB.
         Vec3 eye = player.getEyePosition(1.0f);
-        Vec3 end = hit != null ? hit.getLocation() : eye.add(player.getLookAngle().scale(128.0));
+        Vec3 rayEnd = eye.add(player.getLookAngle().scale(128.0));
+        HitResult vanilla = player.pick(128.0, 1.0f, false);
+        FreeBlockRaycast.Hit rotated = FreeBlockRaycast.raycast(player.level(), eye, rayEnd);
+        boolean useRotated = rotated != null
+                && (vanilla == null || vanilla.getType() == HitResult.Type.MISS
+                || rotated.distSq() <= eye.distanceToSqr(vanilla.getLocation()) + 1.0E-7);
+        Vec3 end = useRotated
+                ? rotated.point()
+                : vanilla != null && vanilla.getType() != HitResult.Type.MISS
+                ? vanilla.getLocation() : rayEnd;
 
-        // Beam first, then fetch a fresh consumer for the hit block (getBuffer may flush).
+        // Beam first, then fetch a fresh consumer for the hit outline (getBuffer may flush).
         drawLine(poseStack, buffers.getBuffer(RenderType.lines()), eye, end, 0xFFFF3030);
 
-        if (hit instanceof BlockHitResult blockHit) {
-            BlockPos pos = blockHit.getBlockPos();
-            // Highlight the hit block.
-            DebugRenderer.renderFilledBox(poseStack, buffers, new AABB(pos), 1.0f, 0.2f, 0.2f, 0.18f);
-            drawBox(poseStack, buffers.getBuffer(RenderType.lines()), new AABB(pos), 0xFFFF6060);
-
-            // Show the reading only when the target changes.
-            if (!pos.equals(LaserState.getLastTarget())) {
-                LaserState.update(pos, eye.distanceTo(end));
-                player.displayClientMessage(Component.literal(String.format(Locale.ROOT,
-                        "Laser: %.1f blocks", eye.distanceTo(end))), true);
+        if (useRotated) {
+            BlockPos pos = rotated.cell();
+            RotationData data = RotationStore.get(player.level(), pos);
+            if (data != null) {
+                // Never draw new AABB(pos) here: the cell is only the storage key and its six
+                // vanilla-aligned edges are the invisible red cube reported by the user. The
+                // outline is made from the same rendered triangles used for collision/rendering.
+                drawRotatedLaserTarget(poseStack, buffers, data, pos,
+                        player.getEyePosition(1.0f), 0xFFFF6060);
+                updateLaserReading(player, pos, eye.distanceTo(end));
             }
+        } else if (vanilla instanceof BlockHitResult blockHit) {
+            BlockPos pos = blockHit.getBlockPos();
+            RotationData data = RotationStore.get(player.level(), pos);
+            if (data != null) {
+                // A storage cell can still win vanilla's comparison when its world state is not
+                // air. Never expose that cell's axis-aligned cube as the rotated block's target.
+                drawRotatedLaserTarget(poseStack, buffers, data, pos,
+                        player.getEyePosition(1.0f), 0xFFFF6060);
+            } else {
+                DebugRenderer.renderFilledBox(poseStack, buffers, new AABB(pos), 1.0f, 0.2f, 0.2f, 0.18f);
+                drawBox(poseStack, buffers.getBuffer(RenderType.lines()), new AABB(pos), 0xFFFF6060);
+            }
+            updateLaserReading(player, pos, eye.distanceTo(end));
+        }
+    }
+
+    /** Draws the exact rotated render/collision surface used by the Laser Tool. */
+    private static void drawRotatedLaserTarget(PoseStack poseStack, MultiBufferSource.BufferSource buffers,
+                                               RotationData data, BlockPos pos, Vec3 camera, int color) {
+        float renderYaw = data.yaw();
+        float renderPitch = data.pitch();
+        if (data.billboard()) {
+            float[] facing = OffGridTransform.billboardAngles(data.center(pos), camera);
+            renderYaw = facing[0];
+            renderPitch = facing[1];
+        }
+        List<MeshCollisionShape.Tri> triangles = RotatedBlockTriangles.triangles(
+                data, pos, Minecraft.getInstance().level, renderYaw, renderPitch);
+        VertexConsumer lines = buffers.getBuffer(RenderType.lines());
+        if (triangles != null) {
+            for (MeshCollisionShape.Tri t : triangles) {
+                Vec3 a = new Vec3(t.ax, t.ay, t.az);
+                Vec3 b = new Vec3(t.bx, t.by, t.bz);
+                Vec3 c = new Vec3(t.cx, t.cy, t.cz);
+                drawLine(poseStack, lines, a, b, color);
+                drawLine(poseStack, lines, b, c, color);
+                drawLine(poseStack, lines, c, a, color);
+            }
+            return;
+        }
+
+        VoxelShape base = data.state().getCollisionShape(Minecraft.getInstance().level, pos);
+        MeshCollisionShape fallback = MeshCollisionShape.fromVoxelShape(base,
+                data.center(pos).x, data.center(pos).y, data.center(pos).z,
+                renderYaw, renderPitch);
+        fallback.forEachTriangle(triangle -> {
+            Vec3 a = new Vec3(triangle.ax, triangle.ay, triangle.az);
+            Vec3 b = new Vec3(triangle.bx, triangle.by, triangle.bz);
+            Vec3 c = new Vec3(triangle.cx, triangle.cy, triangle.cz);
+            drawLine(poseStack, lines, a, b, color);
+            drawLine(poseStack, lines, b, c, color);
+            drawLine(poseStack, lines, c, a, color);
+        });
+    }
+
+    private static void updateLaserReading(Player player, BlockPos pos, double distance) {
+        if (!pos.equals(LaserState.getLastTarget())) {
+            LaserState.update(pos, distance);
+            player.displayClientMessage(Component.literal(String.format(Locale.ROOT,
+                    "Laser: %.1f blocks", distance)), true);
         }
     }
 

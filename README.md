@@ -7,12 +7,12 @@ full entity manipulation, plus a WorldEdit-style command set that applies to the
 
 | Module | Minecraft | Loader | Jar |
 |---|---|---|---|
-| root (`src/`) | 1.21.1 | NeoForge 21.1.x | `build/libs/buildertools-1.0.0.jar` |
-| `forge-1211` | 1.21.1 | Forge | `forge-1211/build/libs/buildertools-forge-1.21.1-1.0.0.jar` |
-| `fabric-1211` | 1.21.1 | Fabric | `fabric-1211/build/libs/buildertools-fabric-1.21.1-1.0.0.jar` |
-| `neoforge-262` | 26.2 | NeoForge | `neoforge-262/build/libs/buildertools-neoforge-26.2-1.0.0.jar` |
-| `forge-262` | 26.2 | Forge | `forge-262/build/libs/buildertools-forge-26.2-1.0.0.jar` |
-| `fabric-262` | 26.2 | Fabric | `fabric-262/build/libs/buildertools-fabric-26.2-1.0.0.jar` |
+| root (`src/`) | 1.21.1 | NeoForge 21.1.x | `build/libs/buildertools-0.1.4.jar` |
+| `forge-1211` | 1.21.1 | Forge | `forge-1211/build/libs/buildertools-forge-1.21.1-0.1.4.jar` |
+| `fabric-1211` | 1.21.1 | Fabric | `fabric-1211/build/libs/buildertools-fabric-1.21.1-0.1.4.jar` |
+| `neoforge-262` | 26.2 | NeoForge | `neoforge-262/build/libs/buildertools-neoforge-26.2-0.1.4.jar` |
+| `forge-262` | 26.2 | Forge | `forge-262/build/libs/buildertools-forge-26.2-0.1.4.jar` |
+| `fabric-262` | 26.2 | Fabric | `fabric-262/build/libs/buildertools-fabric-26.2-0.1.4.jar` |
 
 Each loader × version pair shares the same gameplay logic (selection, commands, undo, clipboard,
 entity tools, brushes, creative settings, renderers) — only the loader-specific event, packet and

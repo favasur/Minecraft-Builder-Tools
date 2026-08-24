@@ -7,6 +7,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -41,24 +42,28 @@ public final class RotationStore {
 
     /** Sets (or updates) the rotated block in a cell and pushes it to every client. */
     public static void set(ServerLevel level, BlockPos pos, RotationData data) {
-        System.out.println("[BuilderTools] RotationStore.set " + pos + " yaw=" + data.yaw() + " pitch=" + data.pitch());
+        Vec3 c = data.center(pos);
+        System.out.println("[BuilderTools] RotationStore.set " + pos + " center=(" + c.x + "," + c.y + "," + c.z
+                + ") yaw=" + data.yaw() + " pitch=" + data.pitch());
         RotationSavedData.of(level).set(pos, data);
-        broadcast(level, new RotationSyncPacket(pos, data.state(), data.yaw(), data.pitch(), data.billboard(), false));
+        broadcast(level, new RotationSyncPacket(pos, data.state(), data.yaw(), data.pitch(), data.billboard(), false,
+                c.x, c.y, c.z));
     }
 
     /** Removes the rotated block from a cell (its block is being broken or replaced). */
     public static void remove(ServerLevel level, BlockPos pos) {
         if (RotationSavedData.of(level).remove(pos)) {
-            broadcast(level, new RotationSyncPacket(pos, null, 0.0f, 0.0f, false, true));
+            broadcast(level, new RotationSyncPacket(pos, null, 0.0f, 0.0f, false, true, 0.0, 0.0, 0.0));
         }
     }
 
     /** Sends the whole layer to a player (on world join). */
     public static void syncAllTo(ServerPlayer player) {
         for (Map.Entry<BlockPos, RotationData> e : RotationSavedData.of((ServerLevel) player.level()).all().entrySet()) {
+            Vec3 c = e.getValue().center(e.getKey());
             net.buildertools.network.ModPackets.CHANNEL.send(new RotationSyncPacket(
                     e.getKey(), e.getValue().state(), e.getValue().yaw(),
-                    e.getValue().pitch(), e.getValue().billboard(), false),
+                    e.getValue().pitch(), e.getValue().billboard(), false, c.x, c.y, c.z),
                     net.minecraftforge.network.PacketDistributor.PLAYER.with(player));
         }
     }
@@ -90,18 +95,16 @@ public final class RotationStore {
         List<Map.Entry<BlockPos, RotationData>> result = new ArrayList<>();
         if (level instanceof ServerLevel serverLevel) {
             for (Map.Entry<BlockPos, RotationData> e : RotationSavedData.of(serverLevel).all().entrySet()) {
-                if (pre.contains(e.getKey().getX() + 0.5, e.getKey().getY() + 0.5, e.getKey().getZ() + 0.5)) {
-                    if (rotatedBounds(level, e).intersects(box)) {
-                        result.add(e);
-                    }
+                Vec3 c = e.getValue().center(e.getKey());
+                if (pre.contains(c.x, c.y, c.z) && rotatedBounds(level, e).intersects(box)) {
+                    result.add(e);
                 }
             }
         } else {
             for (Map.Entry<BlockPos, RotationData> e : CLIENT.entrySet()) {
-                if (pre.contains(e.getKey().getX() + 0.5, e.getKey().getY() + 0.5, e.getKey().getZ() + 0.5)) {
-                    if (rotatedBounds(level, e).intersects(box)) {
-                        result.add(e);
-                    }
+                Vec3 c = e.getValue().center(e.getKey());
+                if (pre.contains(c.x, c.y, c.z) && rotatedBounds(level, e).intersects(box)) {
+                    result.add(e);
                 }
             }
         }
@@ -116,10 +119,10 @@ public final class RotationStore {
     private static AABB rotatedBounds(BlockGetter level, Map.Entry<BlockPos, RotationData> e) {
         BlockPos pos = e.getKey();
         RotationData data = e.getValue();
+        Vec3 c = data.center(pos);
         AABB shape = data.state().getCollisionShape(level, pos).bounds();
         return net.buildertools.util.OffGridTransform.boxAround(
-                pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
-                data.yaw(), data.pitch(), shape);
+                c.x, c.y, c.z, data.yaw(), data.pitch(), shape);
     }
 
     public static void clearClient() {

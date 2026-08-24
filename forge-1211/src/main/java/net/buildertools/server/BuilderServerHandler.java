@@ -2,6 +2,8 @@ package net.buildertools.server;
 
 import net.buildertools.network.packet.SelectionSyncPacket;
 import net.buildertools.registry.ModSounds;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import net.minecraft.commands.arguments.blocks.BlockStateParser;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -42,6 +44,8 @@ import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.shapes.Shapes;
+import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -71,11 +75,18 @@ public final class BuilderServerHandler {
      *  vanilla placement that arrives alongside the mod's OffGridBlockPacket. */
     private static final Map<UUID, RecentOffGrid> RECENT_OFF_GRID = new HashMap<>();
 
+    private static final Logger LOGGER = LogManager.getLogger("BuilderTools");
+
     private BuilderServerHandler() {
     }
 
     public static void sendMessage(ServerPlayer player, String message) {
         player.sendSystemMessage(Component.literal("[Builder] " + message));
+    }
+
+    /** Logs a placement confirmation at debug level instead of spamming chat. */
+    static void sendDebug(ServerPlayer player, String message) {
+        LOGGER.debug("[Builder] {}: {}", player.getScoreboardName(), message);
     }
 
     /** Sends a message and plays the error sound. */
@@ -472,12 +483,14 @@ public final class BuilderServerHandler {
     /**
      * Places a NEW rotated block into the mod's block layer: the held vanilla block goes into the
      * layer (the block itself stays the block it is - same shading, breaking, drops), the vanilla
-     * cell stays AIR, and the layer entry carries the state + rotation. Re-rotating an already
-     * placed block updates its entry in place.
+     * cell stays AIR, and the layer entry carries the state, rotation and the exact world-space
+     * model center {@code (cx, cy, cz)} (fractional for blocks snapped onto a rotated neighbor's
+     * grid). Re-rotating an already placed block updates its entry in place, keeping its center.
      */
-    public static void handleBlockRotation(ServerPlayer player, BlockPos cell, float yaw, float pitch,
-                                           boolean billboard) {
-        if (player.distanceToSqr(Vec3.atCenterOf(cell)) > MAX_DISTANCE * MAX_DISTANCE) {
+    public static void handleBlockRotation(ServerPlayer player, BlockPos cell,
+                                           double cx, double cy, double cz,
+                                           float yaw, float pitch, boolean billboard) {
+        if (player.distanceToSqr(cx, cy, cz) > MAX_DISTANCE * MAX_DISTANCE) {
             sendError(player, "Position is too far away.");
             return;
         }
@@ -488,10 +501,12 @@ public final class BuilderServerHandler {
         }
         RotationData existing = RotationStore.get(level, cell);
         if (existing != null) {
-            // Re-rotate the block already in the layer, strictly in place (its state stays).
-            RotationStore.set(level, cell, new RotationData(existing.state(), yaw, pitch, billboard));
+            // Re-rotate the block already in the layer, strictly in place: its state AND its
+            // exact model center stay, only the angles change.
+            Vec3 c = existing.center(cell);
+            RotationStore.set(level, cell, new RotationData(existing.state(), yaw, pitch, billboard, c));
             recordOffGridPlacement(player, cell);
-            sendMessage(player, "Rotated block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
+            sendDebug(player, "Rotated block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
                     + (billboard ? ", billboard" : "") + ").");
             playSound(player, ModSounds.SET_CORNER_1.get());
             return;
@@ -502,8 +517,16 @@ public final class BuilderServerHandler {
             sendError(player, "Hold a block in your main hand to place.");
             return;
         }
-        if (player.getBoundingBox().intersects(new AABB(cell))) {
+        BlockState state = blockItem.getBlock().defaultBlockState();
+        VoxelShape shape = state.getCollisionShape(level, BlockPos.ZERO);
+        if (player.getBoundingBox().intersects(OffGridTransform.boxAround(cx, cy, cz, yaw, pitch, shape.bounds()))) {
             sendError(player, "You're in the way - move back first.");
+            return;
+        }
+        // The new rotated model may not penetrate any OTHER rotated block (layer or legacy
+        // entity) - touching flush along a rotated face is fine, cutting through is not.
+        if (penetratesRotatedBlock(level, cell, cx, cy, cz, yaw, pitch, shape)) {
+            sendError(player, "That would cut through another rotated block.");
             return;
         }
         // The vanilla block sitting in the cell is replaced (dropped in survival), then the cell
@@ -511,17 +534,51 @@ public final class BuilderServerHandler {
         if (!level.getBlockState(cell).isAir()) {
             level.destroyBlock(cell, !player.getAbilities().instabuild);
         }
-        BlockState state = blockItem.getBlock().defaultBlockState();
-        RotationStore.set(level, cell, new RotationData(state, yaw, pitch, billboard));
+        RotationStore.set(level, cell, new RotationData(state, yaw, pitch, billboard,
+                new Vec3(cx, cy, cz)));
         // Remember the cell: the vanilla use-item packet for the same click may arrive next,
         // and the server-side right-click handler uses this record to cancel the duplicate.
         recordOffGridPlacement(player, cell);
         if (!player.getAbilities().instabuild) {
             held.shrink(1);
         }
-        sendMessage(player, "Placed block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
+        sendDebug(player, "Placed block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
                 + (billboard ? ", billboard" : "") + ").");
         playSound(player, ModSounds.SET_CORNER_1.get());
+    }
+
+    /**
+     * True when a new rotated model centered at {@code (cx, cy, cz)} with the given rotation would
+     * penetrate another rotated block (layer entry or legacy entity). Touching face-to-face is
+     * allowed (the SAT check uses a small tolerance), so flush placements pass.
+     */
+    private static boolean penetratesRotatedBlock(ServerLevel level, BlockPos selfCell,
+                                                  double cx, double cy, double cz,
+                                                  float yaw, float pitch, VoxelShape shape) {
+        AABB around = OffGridTransform.boxAround(cx, cy, cz, yaw, pitch, shape.bounds()).inflate(0.5);
+        for (Map.Entry<BlockPos, RotationData> e : RotationStore.getInBox(level, around)) {
+            if (e.getKey().equals(selfCell)) {
+                continue;
+            }
+            RotationData other = e.getValue();
+            Vec3 oc = other.center(e.getKey());
+            VoxelShape otherShape = other.state().getCollisionShape(level, BlockPos.ZERO);
+            if (OffGridTransform.modelsOverlap(
+                    cx, cy, cz, yaw, pitch, shape,
+                    oc.x, oc.y, oc.z, other.yaw(), other.pitch(), otherShape)) {
+                return true;
+            }
+        }
+        for (OffGridBlockEntity other : level.getEntitiesOfClass(OffGridBlockEntity.class, around)) {
+            Vec3 oc = other.modelCenter();
+            VoxelShape otherShape = other.getRepresentedState().getCollisionShape(level, BlockPos.ZERO);
+            if (OffGridTransform.modelsOverlap(
+                    cx, cy, cz, yaw, pitch, shape,
+                    oc.x, oc.y, oc.z, other.getPlacementYaw(), other.getPlacementPitch(), otherShape)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -565,11 +622,11 @@ public final class BuilderServerHandler {
             atSpot.discardWithDisplay();
             spawnLegacyPair(level, c.x, c.y, c.z, state, yaw, pitch, billboard);
             recordOffGridPlacement(player, BlockPos.containing(cx, cy, cz));
-            sendMessage(player, "Rotated legacy block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch) + ").");
+            sendDebug(player, "Rotated legacy block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch) + ").");
             playSound(player, ModSounds.SET_CORNER_1.get());
             return;
         }
-        handleBlockRotation(player, BlockPos.containing(cx, cy, cz), yaw, pitch, billboard);
+        handleBlockRotation(player, BlockPos.containing(cx, cy, cz), cx, cy, cz, yaw, pitch, billboard);
     }
 
     /** Spawns a legacy off-grid entity pair (display + collidable entity) for old worlds. */
@@ -622,7 +679,7 @@ public final class BuilderServerHandler {
      * is still allowed.
      */
     public static boolean vanillaPlacementOverlapsOffGrid(Level level, BlockPos cell) {
-        AABB cubeShape = new AABB(0, 0, 0, 1, 1, 1);
+        VoxelShape cubeShape = Shapes.block();
         for (OffGridBlockEntity other : level.getEntitiesOfClass(OffGridBlockEntity.class,
                 new AABB(cell).inflate(1.5))) {
             if (!other.getTags().contains(OFF_GRID_TAG)) {
@@ -632,7 +689,7 @@ public final class BuilderServerHandler {
                     cell.getX() + 0.5, cell.getY() + 0.5, cell.getZ() + 0.5, 0.0f, 0.0f, cubeShape,
                     other.modelCenter().x, other.modelCenter().y, other.modelCenter().z,
                     other.getPlacementYaw(), other.getPlacementPitch(),
-                    other.getRepresentedState().getCollisionShape(level, BlockPos.ZERO).bounds())) {
+                    other.getRepresentedState().getCollisionShape(level, BlockPos.ZERO))) {
                 return true;
             }
         }

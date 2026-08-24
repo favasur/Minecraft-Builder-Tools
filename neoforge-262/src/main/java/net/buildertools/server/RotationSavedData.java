@@ -10,6 +10,7 @@ import net.minecraft.util.datafix.DataFixTypes;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.saveddata.SavedDataType;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -25,14 +26,16 @@ import java.util.Map;
 public class RotationSavedData extends SavedData {
     private final Map<BlockPos, RotationData> map = new HashMap<>();
 
-    /** One layer entry serialized as {pos, state, yaw, pitch, billboard}. */
-    private record Entry(BlockPos pos, BlockState state, float yaw, float pitch, boolean billboard) {
+    /** One layer entry serialized as {pos, state, yaw, pitch, billboard, center}. */
+    private record Entry(BlockPos pos, BlockState state, float yaw, float pitch, boolean billboard, Vec3 center) {
         private static final Codec<Entry> CODEC = RecordCodecBuilder.create(instance -> instance.group(
                 BlockPos.CODEC.fieldOf("pos").forGetter(Entry::pos),
                 BlockState.CODEC.fieldOf("state").forGetter(Entry::state),
                 Codec.FLOAT.fieldOf("yaw").forGetter(Entry::yaw),
                 Codec.FLOAT.fieldOf("pitch").forGetter(Entry::pitch),
-                Codec.BOOL.fieldOf("billboard").forGetter(Entry::billboard)
+                Codec.BOOL.fieldOf("billboard").forGetter(Entry::billboard),
+                // Optional: entries saved before the center existed have none (cell-centered).
+                Vec3.CODEC.optionalFieldOf("center", null).forGetter(Entry::center)
         ).apply(instance, Entry::new));
     }
 
@@ -48,7 +51,7 @@ public class RotationSavedData extends SavedData {
         List<Entry> list = new ArrayList<>();
         for (Map.Entry<BlockPos, RotationData> e : data.map.entrySet()) {
             list.add(new Entry(e.getKey(), e.getValue().state(), e.getValue().yaw(),
-                    e.getValue().pitch(), e.getValue().billboard()));
+                    e.getValue().pitch(), e.getValue().billboard(), e.getValue().center(e.getKey())));
         }
         return list;
     }
@@ -56,7 +59,7 @@ public class RotationSavedData extends SavedData {
     private static RotationSavedData fromEntries(List<Entry> entries) {
         RotationSavedData data = new RotationSavedData();
         for (Entry e : entries) {
-            data.map.put(e.pos, new RotationData(e.state, e.yaw, e.pitch, e.billboard));
+            data.map.put(e.pos, new RotationData(e.state, e.yaw, e.pitch, e.billboard, e.center));
         }
         return data;
     }

@@ -34,13 +34,23 @@ public final class SmoothTerrainMixinPlugin implements IMixinConfigPlugin {
 
 	boolean shouldApply(String mixinClassName) {
 		if (mixinClassName.equals("io.github.favasur.smoothterrain.mixin.client.NonSodiumLevelRendererMixin"))
-			return !sodiumInstalled;
+			return !sodiumInstalled && net.buildertools.util.ApiCompat.setBlockDirtyV1();
 		if (mixinClassName.equals("io.github.favasur.smoothterrain.mixin.EntityMixin"))
-			return !apoliInstalled;
+			return !apoliInstalled && net.buildertools.util.ApiCompat.isInWallLambda();
 		if (mixinClassName.startsWith("io.github.favasur.smoothterrain.mixin.client.optifine"))
 			return optiFineInstalled;
 		if (mixinClassName.startsWith("io.github.favasur.smoothterrain.mixin.client.sodium"))
 			return sodiumInstalled;
+		if (mixinClassName.equals("io.github.favasur.smoothterrain.mixin.client.LiquidBlockRendererMixin"))
+			return net.buildertools.util.ApiCompat.liquidBlockRenderer();
+		if (mixinClassName.equals("io.github.favasur.smoothterrain.mixin.client.RenderChunkRegionMixin"))
+			return net.buildertools.util.ApiCompat.renderChunkRegion();
+		if (mixinClassName.equals("io.github.favasur.smoothterrain.mixin.client.RenderChunkRebuildTaskMixin"))
+			return net.buildertools.util.ApiCompat.sectionCompilerCompileV1();
+		if (mixinClassName.equals("io.github.favasur.smoothterrain.mixin.client.LevelRendererMixin"))
+			return net.buildertools.util.ApiCompat.renderHitOutlineV1() && net.buildertools.util.ApiCompat.renderLevelV1();
+		if (mixinClassName.equals("io.github.favasur.smoothterrain.mixin.client.ScreenEffectRendererMixin"))
+			return net.buildertools.util.ApiCompat.screenEffectGetOverlayBlock();
 		return true;
 	}
 

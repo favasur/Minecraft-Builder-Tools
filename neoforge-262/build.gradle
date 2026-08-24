@@ -13,6 +13,12 @@ base {
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(25)
 
+sourceSets {
+    main {
+        java.srcDir('../shared/flexiblepainting-262/src/main/java')
+    }
+}
+
 runs {
     configureEach {
         systemProperty 'forge.logging.markers', 'REGISTRIES'

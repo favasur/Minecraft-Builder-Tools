@@ -33,3 +33,6 @@ side="BOTH"
 
 [[mixins]]
 config="buildertools.mixins.json"
+
+[[mixins]]
+config="buildertools.flexiblepainting.mixins.json"

@@ -20,6 +20,9 @@ All operations are server-validated and work in single player and multiplayer.
 [[mixins]]
 config="buildertools.mixins.json"
 
+[[mixins]]
+config="buildertools.flexiblepainting.mixins.json"
+
 [[dependencies.${mod_id}]]
 modId="neoforge"
 type="required"

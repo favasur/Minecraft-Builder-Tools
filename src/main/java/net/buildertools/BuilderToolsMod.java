@@ -38,6 +38,7 @@ public class BuilderToolsMod {
         NeoForge.EVENT_BUS.register(ServerEvents.class);
 
         if (FMLEnvironment.dist.isClient()) {
+            ClientEvents.initializeGeometry();
             modEventBus.addListener(KeyBindings::registerKeyMappings);
             modEventBus.addListener(this::registerRenderers);
             NeoForge.EVENT_BUS.register(ClientEvents.class);

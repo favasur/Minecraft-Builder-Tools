@@ -1,17 +1,36 @@
 package io.github.favasur.smoothterrain.mixin;
 
+import io.github.favasur.smoothterrain.collision.MeshCollisionScope;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.CollisionContext;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
+import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.Redirect;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 @Mixin(Entity.class)
 public class EntityMixin {
+
+	/**
+	 * Exact mesh shapes are valid only while vanilla is resolving the block list for Entity#move.
+	 * Keeping this scope around the private collision routine prevents camera, placement, suffocation
+	 * and pathfinding queries from receiving a triangle-backed VoxelShape.
+	 */
+	@Inject(method = "collide(Lnet/minecraft/world/phys/Vec3;)Lnet/minecraft/world/phys/Vec3;", at = @At("HEAD"))
+	private void noCubes$beginMovementCollision(Vec3 movement, CallbackInfoReturnable<Vec3> cir) {
+		MeshCollisionScope.enterMovement();
+	}
+
+	@Inject(method = "collide(Lnet/minecraft/world/phys/Vec3;)Lnet/minecraft/world/phys/Vec3;", at = @At("RETURN"))
+	private void noCubes$endMovementCollision(Vec3 movement, CallbackInfoReturnable<Vec3> cir) {
+		MeshCollisionScope.exitMovement();
+	}
 
 	/**
 	 * Make the suffocation check provide the player to the collision getter (it doesn't otherwise).

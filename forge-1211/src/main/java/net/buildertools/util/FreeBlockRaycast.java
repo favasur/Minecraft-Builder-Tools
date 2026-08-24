@@ -29,10 +29,10 @@ public final class FreeBlockRaycast {
         for (Map.Entry<BlockPos, RotationData> e : RotationStore.getInBox(level, rayBox)) {
             BlockPos pos = e.getKey();
             RotationData rot = e.getValue();
+            Vec3 c = rot.center(pos);
             AABB shape = rot.state().getCollisionShape(level, pos).bounds();
             AABB box = OffGridTransform.boxAround(
-                    pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5,
-                    rot.yaw(), rot.pitch(), shape);
+                    c.x, c.y, c.z, rot.yaw(), rot.pitch(), shape);
             double[] t = rayAABB(from, to, box);
             if (t == null) {
                 continue;

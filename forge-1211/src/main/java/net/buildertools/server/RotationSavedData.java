@@ -12,6 +12,7 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.saveddata.SavedData;
+import net.minecraft.world.phys.Vec3;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -71,9 +72,13 @@ public class RotationSavedData extends SavedData {
                 } catch (Exception ignored) {
                 }
             }
+            Vec3 center = null;
+            if (entry.contains("cx") && entry.contains("cy") && entry.contains("cz")) {
+                center = new Vec3(entry.getDouble("cx"), entry.getDouble("cy"), entry.getDouble("cz"));
+            }
             data.rotations.put(new BlockPos((int) pos[0], (int) pos[1], (int) pos[2]),
                     new RotationData(state, entry.getFloat("yaw"), entry.getFloat("pitch"),
-                            entry.getBoolean("billboard")));
+                            entry.getBoolean("billboard"), center));
         }
         return data;
     }
@@ -88,6 +93,10 @@ public class RotationSavedData extends SavedData {
             entry.putFloat("yaw", e.getValue().yaw());
             entry.putFloat("pitch", e.getValue().pitch());
             entry.putBoolean("billboard", e.getValue().billboard());
+            Vec3 c = e.getValue().center(e.getKey());
+            entry.putDouble("cx", c.x);
+            entry.putDouble("cy", c.y);
+            entry.putDouble("cz", c.z);
             list.add(entry);
         }
         tag.put("rotations", list);

@@ -14,6 +14,12 @@ base {
 // Mojang ships Java 25 to end users in 26.1+, so the mod targets Java 25.
 java.toolchain.languageVersion = JavaLanguageVersion.of(25)
 
+sourceSets {
+    main {
+        java.srcDir('../shared/flexiblepainting-262/src/main/java')
+    }
+}
+
 minecraft {
     runs {
         configureEach {
@@ -44,6 +50,7 @@ dependencies {
     implementation minecraft.dependency("net.minecraftforge:forge:${minecraft_version}-${forge_version}")
     annotationProcessor 'net.minecraftforge:eventbus-validator:7.0.5'
 }
+
 
 // Expand ${...} placeholders in mods.toml at build time.
 tasks.withType(ProcessResources).configureEach {

@@ -13,6 +13,12 @@ base {
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
+sourceSets {
+    main {
+        java.srcDir('../shared/flexiblepainting-1211/src/main/java')
+    }
+}
+
 loom {
     // The NeoForge/Forge ports use Mojang official mappings; keep the code identical by
     // using the same mappings here instead of Yarn.

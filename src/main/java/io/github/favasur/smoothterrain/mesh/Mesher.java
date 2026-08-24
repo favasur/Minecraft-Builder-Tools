@@ -47,6 +47,14 @@ public interface Mesher {
 
 	Vec3i getNegativeAreaExtension();
 
+	/**
+	 * A stable identity for this mesher configuration, used as part of the mesh cache key.
+	 * Distinct configurations must return distinct values (e.g. the 2x smoothness variants).
+	 */
+	default String cacheId() {
+		return getClass().getName();
+	}
+
 	interface FaceAction {
 
 		/**

@@ -1,6 +1,7 @@
 package io.github.favasur.smoothterrain.mixin;
 
 import io.github.favasur.smoothterrain.collision.CollisionHandler;
+import io.github.favasur.smoothterrain.collision.MeshCollisionScope;
 import io.github.favasur.smoothterrain.hooks.Hooks;
 import io.github.favasur.smoothterrain.hooks.trait.ISmoothTerrainBlockState;
 import net.minecraft.core.BlockPos;
@@ -10,6 +11,7 @@ import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.shapes.CollisionContext;
+import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -102,8 +104,17 @@ public abstract class BlockStateBaseMixin implements ISmoothTerrainBlockState {
 
 	@Unique
 	private static void noCubes$collisionShapeHelper(BlockState state, BlockGetter level, BlockPos pos, CollisionContext context, CallbackInfoReturnable<VoxelShape> cir) {
-		if (Hooks.collisionsEnabledFor(state))
+		if (!Hooks.collisionsEnabledFor(state))
+			return;
+		// During Entity#collide the section mesh is injected by CollisionGetterMixin. Do not also
+		// return the old per-cell approximation: apart from making sloped terrain too thick, that
+		// approximation is block-local while the exact mesh is world-space. All other callers keep
+		// the ordinary smooth-terrain shape for suffocation, placement, camera, pathfinding, etc.
+		if (MeshCollisionScope.isEntityMovement()) {
+			cir.setReturnValue(Shapes.empty());
+		} else {
 			cir.setReturnValue(CollisionHandler.getShapeOfSmoothBlock(state, level, pos, context));
+		}
 	}
 
 	/**

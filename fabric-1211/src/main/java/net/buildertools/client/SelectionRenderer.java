@@ -24,6 +24,7 @@ import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.debug.DebugRenderer;
 import net.minecraft.client.renderer.texture.OverlayTexture;
+import net.minecraft.client.resources.model.BakedModel;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.Entity;
@@ -336,18 +337,20 @@ public final class SelectionRenderer {
             }
         }
         if (state != null) {
-            poseStack.pushPose();
-            poseStack.translate(center.x - 0.5, center.y - 0.5, center.z - 0.5);
-            org.joml.Vector3f c = new org.joml.Vector3f(0.5f, 0.5f, 0.5f);
-            org.joml.Vector3f t = new org.joml.Vector3f(c)
-                    .sub(rot.transform(new org.joml.Vector3f(c), new org.joml.Vector3f()));
-            poseStack.translate(t.x, t.y, t.z);
-            poseStack.mulPose(rot);
-            Minecraft.getInstance().getBlockRenderer().renderSingleBlock(
-                    state, poseStack, buffers,
-                    LevelRenderer.getLightColor(player.level(), target),
-                    OverlayTexture.NO_OVERLAY);
-            poseStack.popPose();
+            BakedModel rotated = RotatedBlockModel.get(state, yaw, pitch);
+            if (rotated != null) {
+                poseStack.pushPose();
+                // The model geometry is pre-rotated around its center (see RotatedBlockModel), so
+                // the pose only places the local 0..1 model box at the exact model center.
+                poseStack.translate(center.x - 0.5, center.y - 0.5, center.z - 0.5);
+                // Render like the placed blocks (same continuous world-space face shading), so the
+                // preview matches exactly what will be placed.
+                com.mojang.blaze3d.vertex.VertexConsumer consumer = buffers.getBuffer(
+                        net.minecraft.client.renderer.ItemBlockRenderTypes.getRenderType(state, false));
+                RotatedBlockRendering.render(rotated, state, target, center, poseStack, consumer,
+                        player.level());
+                poseStack.popPose();
+            }
         }
     }
 

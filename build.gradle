@@ -13,6 +13,12 @@ base {
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
+sourceSets {
+    main {
+        java.srcDir('shared/flexiblepainting-1211/src/main/java')
+    }
+}
+
 runs {
     configureEach {
         systemProperty 'forge.logging.markers', 'REGISTRIES'
@@ -23,7 +29,6 @@ runs {
 
     client {
         systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
-        programArguments.addAll('--quickPlaySingleplayer', 'BT Smoke Test')
     }
 
     server {

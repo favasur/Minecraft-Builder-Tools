@@ -11,6 +11,7 @@
     "BlockGetterMixin",
     "LevelMixin",
     "CollisionGetterMixin",
+    "ServerGamePacketListenerImplMixin",
     "MultiPlayerGameModeMixin"
   ],
   "injectors": {

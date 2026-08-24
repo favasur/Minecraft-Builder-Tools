@@ -1,0 +1,25 @@
+{
+    "required": true,
+    "package": "io.github.favasur.fullslabs.neoforge.mixin",
+    "compatibilityLevel": "JAVA_21",
+    "minVersion": "0.8",
+    "plugin": "io.github.favasur.fullslabs.mixin.FullSlabsMixinPlugin",
+    "client": [
+        "client.ClientLevelMixin"
+    ],
+    "mixins": [
+        "AxeItemMixin",
+        "BlockItemMixin",
+        "EntityMixin",
+        "LivingEntityMixin",
+        "MixedSlabBlockEntityMixin",
+        "MixedSlabBlockMixin",
+        "ServerPlayerGameModeMixin"
+    ],
+    "injectors": {
+        "defaultRequire": 1
+    },
+    "mixinextras": {
+        "minVersion": "0.5.0"
+    }
+}

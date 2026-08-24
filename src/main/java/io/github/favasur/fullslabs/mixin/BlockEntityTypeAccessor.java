@@ -1,0 +1,17 @@
+package io.github.favasur.fullslabs.mixin;
+
+import java.util.Set;
+import net.minecraft.world.level.block.Block;
+import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.level.block.entity.BlockEntityType;
+import org.spongepowered.asm.mixin.Mixin;
+import org.spongepowered.asm.mixin.gen.Invoker;
+
+@Mixin(value={BlockEntityType.class})
+public interface BlockEntityTypeAccessor {
+    @Invoker(value="<init>")
+    public static <T extends BlockEntity> BlockEntityType<T> constructor(BlockEntityType.BlockEntitySupplier<? extends T> factory, Set<Block> blocks, com.mojang.datafixers.types.Type<?> dataFixerType) {
+        throw new AssertionError();
+    }
+}
+
