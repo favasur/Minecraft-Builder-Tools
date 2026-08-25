@@ -143,6 +143,10 @@ public final class SlabRegistry {
 		});
 	}
 
+	public static BlockEntityType<MixedSlabBlockEntity> mixedSlabEntity() {
+		return MIXED_SLAB_ENTITY.get();
+	}
+
 	public static <S extends SlabBlock, V extends VerticalSlabBlock> void registerVertical(Class<S> slabClass, VerticalFactory<S, V> factory) {
 		registerVertical(slabClass, factory, null);
 	}

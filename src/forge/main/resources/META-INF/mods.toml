@@ -36,3 +36,6 @@ config="buildertools.mixins.json"
 
 [[mixins]]
 config="buildertools.flexiblepainting.mixins.json"
+
+[[mixins]]
+config="fullslabs.mixins.json"

@@ -1,71 +1,179 @@
 plugins {
     id 'java-library'
     id 'maven-publish'
-    id 'net.neoforged.gradle.userdev' version '7.1.38'
+    id 'net.neoforged.gradle.userdev' version '7.1.38' apply false
+    id 'net.minecraftforge.gradle' version '[6.0,6.2)' apply false
+    id 'org.spongepowered.mixin' version '0.7.+' apply false
+}
+
+def forgeTarget = project.findProperty('loader')?.toString()?.equalsIgnoreCase('forge') ?: false
+if (forgeTarget) {
+    apply plugin: 'net.minecraftforge.gradle'
+    apply plugin: 'org.spongepowered.mixin'
+} else {
+    apply plugin: 'net.neoforged.gradle.userdev'
 }
 
 version = mod_version
 group = mod_group_id
 
 base {
-    archivesName = mod_id
+    archivesName = forgeTarget ? "${mod_id}-forge-${minecraft_version}" : "${mod_id}-neoforge-${minecraft_version}"
 }
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 
+def rootFullSlabs = file('src/main/java/io/github/favasur/fullslabs').toPath().toAbsolutePath().normalize()
+
+def excludeNeoForgeFullSlabsFiles = { element ->
+    def path = element.file.toPath().toAbsolutePath().normalize()
+    if (!path.startsWith(rootFullSlabs)) {
+        return false
+    }
+    def relative = rootFullSlabs.relativize(path).toString().replace(File.separatorChar, '/' as char)
+    return relative == 'FullSlabs.java'
+            || relative == 'SlabRegistry.java'
+            || relative == 'config/Controls.java'
+            || relative == 'variants/VariantRegistry.java'
+            || relative == 'client/models/MixedSlabModel.java'
+            || relative == 'client/variants/VariantModelBaker.java'
+            || relative.startsWith('loot/')
+            || relative.startsWith('compat/')
+            || relative.startsWith('config/neoforge/')
+            || relative.startsWith('neoforge/')
+}
+
 sourceSets {
     main {
-        java.srcDir('shared/flexiblepainting-1211/src/main/java')
+        if (forgeTarget) {
+            java.setSrcDirs([
+                    'src/forge/main/java',
+                    'shared/flexiblepainting-1211/src/main/java',
+                    'shared/fullslabs-1211/src/main/java',
+                    'src/main/java/io/github/favasur/fullslabs'
+            ])
+            java.exclude(excludeNeoForgeFullSlabsFiles)
+            resources.setSrcDirs(['src/forge/main/resources'])
+        } else {
+            java.srcDir('shared/flexiblepainting-1211/src/main/java')
+        }
     }
 }
 
-runs {
-    configureEach {
-        systemProperty 'forge.logging.markers', 'REGISTRIES'
-        systemProperty 'forge.logging.console.level', 'debug'
-        workingDirectory project.layout.projectDirectory.dir('run').dir(name)
-        modSource project.sourceSets.main
+if (forgeTarget) {
+    minecraft {
+        mappings channel: 'official', version: minecraft_version
+
+        runs {
+            client {
+                workingDirectory project.file('run/forge')
+                property 'forge.logging.markers', 'REGISTRIES'
+                property 'forge.logging.console.level', 'debug'
+                mods {
+                    buildertools {
+                        source sourceSets.main
+                    }
+                }
+            }
+            server {
+                workingDirectory project.file('run/forge')
+                property 'forge.logging.markers', 'REGISTRIES'
+                property 'forge.logging.console.level', 'debug'
+                args '--nogui'
+                mods {
+                    buildertools {
+                        source sourceSets.main
+                    }
+                }
+            }
+        }
     }
 
-    client {
-        systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+    repositories {
+        mavenCentral()
+        maven { url = 'https://maven.minecraftforge.net' }
     }
 
-    server {
-        systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
-        argument '--nogui'
+    dependencies {
+        minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+        compileOnly 'org.spongepowered:mixin:0.8.7'
+        annotationProcessor 'org.spongepowered:mixin:0.8.7:processor'
+        implementation 'io.github.llamalad7:mixinextras-forge:0.5.4'
+        compileOnly 'io.github.llamalad7:mixinextras-common:0.5.4'
     }
 
-    gameTestServer {
-        systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+    mixin {
+        add sourceSets.main, 'buildertools.refmap.json'
+        config 'buildertools.mixins.json'
+        config 'buildertools.flexiblepainting.mixins.json'
+        config 'fullslabs.mixins.json'
     }
-}
 
-configurations {
-    runtimeClasspath.extendsFrom localRuntime
-}
+    tasks.withType(ProcessResources).configureEach {
+        var replaceProperties = [
+                minecraft_version_range: minecraft_version_range,
+                forge_version          : forge_version,
+                loader_version_range   : loader_version_range,
+                mod_id                 : mod_id,
+                mod_name               : mod_name,
+                mod_license            : mod_license,
+                mod_version            : mod_version,
+        ]
+        inputs.properties replaceProperties
+        filesMatching(['META-INF/mods.toml']) {
+            expand replaceProperties
+        }
+        from('src/main/resources') {
+            include 'assets/fullslabs/**'
+        }
+    }
+} else {
+    runs {
+        configureEach {
+            systemProperty 'forge.logging.markers', 'REGISTRIES'
+            systemProperty 'forge.logging.console.level', 'debug'
+            workingDirectory project.layout.projectDirectory.dir('run').dir(name)
+            modSource project.sourceSets.main
+        }
 
-dependencies {
-    implementation "net.neoforged:neoforge:${neo_version}"
-    // Bundled Smooth Terrain meshing (NoCubes-style Surface Nets) needs these at compile+runtime.
-    implementation 'io.github.llamalad7:mixinextras-neoforge:0.3.5'
-}
+        client {
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
 
-// Expand ${...} placeholders in the mods.toml at build time.
-tasks.withType(ProcessResources).configureEach {
-    var replaceProperties = [
-            minecraft_version      : minecraft_version,
-            minecraft_version_range: minecraft_version_range,
-            neo_version            : neo_version,
-            loader_version_range   : loader_version_range,
-            mod_id                 : mod_id,
-            mod_name               : mod_name,
-            mod_license            : mod_license,
-            mod_version            : mod_version,
-    ]
-    inputs.properties replaceProperties
-    filesMatching(['META-INF/neoforge.mods.toml']) {
-        expand replaceProperties
+        server {
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+            argument '--nogui'
+        }
+
+        gameTestServer {
+            systemProperty 'neoforge.enabledGameTestNamespaces', project.mod_id
+        }
+    }
+
+    configurations {
+        runtimeClasspath.extendsFrom localRuntime
+    }
+
+    dependencies {
+        implementation "net.neoforged:neoforge:${neo_version}"
+        implementation 'io.github.llamalad7:mixinextras-neoforge:0.3.5'
+    }
+
+    tasks.withType(ProcessResources).configureEach {
+        var replaceProperties = [
+                minecraft_version      : minecraft_version,
+                minecraft_version_range: minecraft_version_range,
+                neo_version            : neo_version,
+                loader_version_range   : loader_version_range,
+                mod_id                 : mod_id,
+                mod_name               : mod_name,
+                mod_license            : mod_license,
+                mod_version            : mod_version,
+        ]
+        inputs.properties replaceProperties
+        filesMatching(['META-INF/neoforge.mods.toml']) {
+            expand replaceProperties
+        }
     }
 }
 

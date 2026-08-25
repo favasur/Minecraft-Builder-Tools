@@ -8,7 +8,7 @@ full entity manipulation, plus a WorldEdit-style command set that applies to the
 | Module | Minecraft | Loader | Jar |
 |---|---|---|---|
 | root (`src/`) | 1.21.1 | NeoForge 21.1.x | `build/libs/buildertools-0.1.4.jar` |
-| `forge-1211` | 1.21.1 | Forge | `forge-1211/build/libs/buildertools-forge-1.21.1-0.1.4.jar` |
+| `root (-Ploader=forge)` | 1.21.1 | Forge | `build/libs/buildertools-forge-1.21.1-0.1.4.jar` |
 | `fabric-1211` | 1.21.1 | Fabric | `fabric-1211/build/libs/buildertools-fabric-1.21.1-0.1.4.jar` |
 | `neoforge-262` | 26.2 | NeoForge | `neoforge-262/build/libs/buildertools-neoforge-26.2-0.1.4.jar` |
 | `forge-262` | 26.2 | Forge | `forge-262/build/libs/buildertools-forge-26.2-0.1.4.jar` |

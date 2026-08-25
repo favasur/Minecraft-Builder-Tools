@@ -35,7 +35,7 @@ extends BlockEntity {
     private SlabBlock away;
 
     public MixedSlabBlockEntity(BlockPos pos, BlockState state, SlabBlock towards, SlabBlock away) {
-        super((BlockEntityType)SlabRegistry.MIXED_SLAB_ENTITY.get(), pos, state);
+        super(SlabRegistry.mixedSlabEntity(), pos, state);
         this.towards = towards;
         this.away = away;
     }
