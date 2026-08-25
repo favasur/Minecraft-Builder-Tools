@@ -19,7 +19,8 @@
   },
   "mixins": [
     "buildertools.mixins.json",
-    "buildertools.flexiblepainting.mixins.json"
+    "buildertools.flexiblepainting.mixins.json",
+    "fullslabs.mixins.json"
   ],
   "depends": {
     "fabricloader": ">=0.16.0",

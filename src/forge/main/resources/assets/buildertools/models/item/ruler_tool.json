@@ -1,0 +1,14 @@
+{
+  "parent": "minecraft:item/handheld",
+  "textures": {
+    "layer0": "buildertools:item/ruler_tool"
+  },
+  "overrides": [
+    {
+      "predicate": {
+        "damage": 1.0
+      },
+      "model": "buildertools:item/brush_hold"
+    }
+  ]
+}

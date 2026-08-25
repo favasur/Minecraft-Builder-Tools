@@ -16,6 +16,24 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(21)
 sourceSets {
     main {
         java.srcDir('../shared/flexiblepainting-1211/src/main/java')
+        java.srcDir('../shared/fullslabs-1211/src/main/java')
+        java.srcDir('../src/main/java/io/github/favasur/fullslabs')
+        java.exclude 'FullSlabs.java'
+        java.exclude 'SlabRegistry.java'
+        java.exclude 'config/Controls.java'
+        java.exclude 'variants/VariantRegistry.java'
+        java.exclude 'client/models/MixedSlabModel.java'
+        java.exclude 'client/variants/VariantModelBaker.java'
+        java.exclude 'loot/**'
+        java.exclude 'compat/**'
+        java.exclude 'config/neoforge/**'
+        java.exclude 'neoforge/**'
+    }
+}
+
+tasks.named('processResources') {
+    from('../src/main/resources') {
+        include 'assets/fullslabs/**'
     }
 }
 
@@ -34,6 +52,7 @@ dependencies {
     mappings loom.officialMojangMappings()
     modImplementation "net.fabricmc:fabric-loader:${loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
+    modImplementation 'io.github.llamalad7:mixinextras-fabric:0.5.4'
 }
 
 processResources {
