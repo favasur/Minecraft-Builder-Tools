@@ -181,6 +181,19 @@ tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
 
+tasks.register('collectJars') {
+    dependsOn tasks.named('jar')
+    doLast {
+        def output = rootProject.file('dist')
+        output.mkdirs()
+        copy {
+            from tasks.named('jar').get().archiveFile
+            into output
+            rename { "${mod_id}-${forgeTarget ? 'forge' : 'neoforge'}-${minecraft_version}-${mod_version}.jar" }
+        }
+    }
+}
+
 publishing {
     publications {
         register('mavenJava', MavenPublication) {

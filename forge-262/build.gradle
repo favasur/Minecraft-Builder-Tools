@@ -69,6 +69,19 @@ tasks.withType(ProcessResources).configureEach {
     }
 }
 
+tasks.register('collectJars') {
+    dependsOn tasks.named('jar')
+    doLast {
+        def output = file('../dist')
+        output.mkdirs()
+        copy {
+            from tasks.named('jar').get().archiveFile
+            into output
+            rename { "${mod_id}-forge-${minecraft_version}-${mod_version}.jar" }
+        }
+    }
+}
+
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }

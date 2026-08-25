@@ -55,6 +55,19 @@ dependencies {
     modImplementation 'io.github.llamalad7:mixinextras-fabric:0.5.4'
 }
 
+tasks.register('collectJars') {
+    dependsOn tasks.named('jar')
+    doLast {
+        def output = file('../dist')
+        output.mkdirs()
+        copy {
+            from tasks.named('jar').get().archiveFile
+            into output
+            rename { "${mod_id}-fabric-${minecraft_version}-${mod_version}.jar" }
+        }
+    }
+}
+
 processResources {
     inputs.property 'version', project.version
     filesMatching('fabric.mod.json') {

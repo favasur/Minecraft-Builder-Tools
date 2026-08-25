@@ -202,13 +202,6 @@ public final class BlockRotateState {
         if (hit instanceof BlockHitResult blockHit) {
             return blockHit.getBlockPos().relative(blockHit.getDirection());
         }
-        // Air Placement (Hytale technique): when the cursor is on empty air the block is placed
-        // at a fixed distance straight ahead, so you can lay blocks in mid-air without a surface.
-        if (net.buildertools.client.settings.BuilderSettings.isAirPlacement()) {
-            return BlockPos.containing(player.getEyePosition(1.0f).add(
-                    player.getLookAngle().scale(
-                            net.buildertools.client.settings.BuilderSettings.getAirPlaceDistance())));
-        }
         return null;
     }
 
