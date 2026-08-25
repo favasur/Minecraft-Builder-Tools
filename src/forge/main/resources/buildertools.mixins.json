@@ -8,11 +8,9 @@
     "PlayerMixin",
     "LocalPlayerMixin",
     "GuiMixin",
+    "MouseHandlerMixin",
     "ItemRendererMixin",
-    "DisplayAccessor",
-    "BlockDisplayAccessor",
     "BlockGetterMixin",
-    "CollisionGetterMixin",
     "ServerGamePacketListenerImplMixin",
     "LevelMixin",
     "MultiPlayerGameModeMixin"
