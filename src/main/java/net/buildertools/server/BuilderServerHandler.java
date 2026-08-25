@@ -506,6 +506,12 @@ public final class BuilderServerHandler {
             return;
         }
         BlockState state = blockItem.getBlock().defaultBlockState();
+        if (state.getBlock() instanceof io.github.favasur.fullslabs.block.VerticalSlabBlock vertical) {
+            state = vertical.defaultBlockState();
+        } else if (state.getBlock() instanceof net.minecraft.world.level.block.SlabBlock slab
+                && io.github.favasur.fullslabs.block.VerticalSlabBlock.hasVertical(slab)) {
+            state = io.github.favasur.fullslabs.block.VerticalSlabBlock.getVertical(slab).defaultBlockState();
+        }
         VoxelShape shape = state.getCollisionShape(level, BlockPos.ZERO);
         if (player.getBoundingBox().intersects(OffGridTransform.boxAround(cx, cy, cz, yaw, pitch, shape.bounds()))) {
             sendError(player, "You're in the way - move back first.");
