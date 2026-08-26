@@ -349,11 +349,8 @@ public final class SelectionRenderer {
         if (state == null) {
             ItemStack held = player.getMainHandItem();
             if (held.getItem() instanceof BlockItem blockItem) {
-                state = blockItem.getBlock().defaultBlockState();
-                if (state.getBlock() instanceof net.minecraft.world.level.block.SlabBlock slab
-                        && io.github.favasur.fullslabs.block.VerticalSlabBlock.hasVertical(slab)) {
-                    state = io.github.favasur.fullslabs.block.VerticalSlabBlock.getVertical(slab).defaultBlockState();
-                }
+                state = io.github.favasur.fullslabs.block.SlabVertical.vertical(
+                        blockItem.getBlock().defaultBlockState());
             }
         }
         if (state != null) {

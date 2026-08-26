@@ -21,9 +21,7 @@ public final class BuilderToolsMixinPlugin implements IMixinConfigPlugin {
 		String name = mixinClassName.substring(mixinClassName.lastIndexOf('.') + 1);
 		return switch (name) {
 			case "ItemRendererMixin" -> ApiCompat.itemRendererRenderV1();
-			case "MultiPlayerGameModeMixin", "ClientPlayerInteractionManagerMixin" -> ApiCompat.startDestroyBlockV1();
-			case "MouseHandlerMixin" -> ApiCompat.mouseHandlerV1();
-			case "GuiMixin" -> ApiCompat.guiRenderV1();
+			case "MultiPlayerGameModeMixin" -> ApiCompat.startDestroyBlockV1();
 			case "LevelMixin" -> ApiCompat.levelSetBlock4Arg();
 			default -> true;
 		};

@@ -7,7 +7,7 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
-import net.minecraftforge.event.network.CustomPayloadEvent;
+import net.minecraftforge.event.network.CustomPayloadEvent.Context;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
@@ -34,11 +34,11 @@ public record EntityDuplicatePacket(int entityId) implements CustomPacketPayload
         return TYPE;
     }
 
-    public static void handle(EntityDuplicatePacket payload, CustomPayloadEvent.Context context) {
+    public static void handle(EntityDuplicatePacket payload, Context context) {
         context.enqueueWork(() -> {
-            ServerPlayer player = context.getSender();
-            if (player != null) {
-                BuilderServerHandler.duplicateEntity(player, payload.entityId());
+            ServerPlayer serverPlayer = context.getSender();
+            if (serverPlayer != null) {
+                BuilderServerHandler.duplicateEntity(serverPlayer, payload.entityId());
             }
         });
     }

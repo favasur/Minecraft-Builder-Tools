@@ -7,7 +7,7 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
-import net.minecraftforge.event.network.CustomPayloadEvent;
+import net.minecraftforge.event.network.CustomPayloadEvent.Context;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
@@ -49,11 +49,11 @@ public record PlayerAbilitiesPacket(float flySpeed, Boolean noClip, Boolean fly)
         return TYPE;
     }
 
-    public static void handle(PlayerAbilitiesPacket payload, CustomPayloadEvent.Context context) {
+    public static void handle(PlayerAbilitiesPacket payload, Context context) {
         context.enqueueWork(() -> {
-            ServerPlayer player = context.getSender();
-            if (player != null) {
-                BuilderServerHandler.applyPlayerAbilities(player,
+            ServerPlayer serverPlayer = context.getSender();
+            if (serverPlayer != null) {
+                BuilderServerHandler.applyPlayerAbilities(serverPlayer,
                         payload.flySpeed(), payload.noClip(), payload.fly());
             }
         });

@@ -6,8 +6,8 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
-
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.world.entity.player.Player;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
@@ -49,11 +49,13 @@ public record PlayerAbilitiesPacket(float flySpeed, Boolean noClip, Boolean fly)
         return TYPE;
     }
 
-    public static void handle(PlayerAbilitiesPacket payload, ServerPlayNetworking.Context ctx) {
-        ServerPlayer player = ctx.player();
-        ctx.server().execute(() -> {
-                BuilderServerHandler.applyPlayerAbilities(player,
+    public static void handle(PlayerAbilitiesPacket payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            if (player instanceof ServerPlayer serverPlayer) {
+                BuilderServerHandler.applyPlayerAbilities(serverPlayer,
                         payload.flySpeed(), payload.noClip(), payload.fly());
+            }
         });
     }
 }

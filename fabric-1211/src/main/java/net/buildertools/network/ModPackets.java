@@ -1,5 +1,6 @@
 package net.buildertools.network;
 
+import net.buildertools.BuilderToolsMod;
 import net.buildertools.network.packet.BlockRotationPacket;
 import net.buildertools.network.packet.EntityDeletePacket;
 import net.buildertools.network.packet.EntityDuplicatePacket;
@@ -8,74 +9,49 @@ import net.buildertools.network.packet.EntitySpawnPacket;
 import net.buildertools.network.packet.EntityTransformPacket;
 import net.buildertools.network.packet.FreeBlockBreakPacket;
 import net.buildertools.network.packet.OffGridBlockPacket;
+import net.buildertools.network.packet.RotationSyncPacket;
+import net.buildertools.network.packet.PlayerAbilitiesPacket;
 import net.buildertools.network.packet.PaintPacket;
 import net.buildertools.network.packet.PastePacket;
-import net.buildertools.network.packet.PlayerAbilitiesPacket;
-import net.buildertools.network.packet.RotationSyncPacket;
 import net.buildertools.network.packet.ScatterPacket;
 import net.buildertools.network.packet.SelectionCopyPacket;
 import net.buildertools.network.packet.SelectionFillPacket;
 import net.buildertools.network.packet.SelectionSyncPacket;
 import net.buildertools.network.packet.SmoothPacket;
+import net.buildertools.network.packet.SmoothTerrainTogglePacket;
 import net.buildertools.network.packet.StretchPacket;
 import net.buildertools.network.packet.UndoPacket;
 import net.buildertools.network.packet.WorldSettingsPacket;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.neoforged.neoforge.network.event.RegisterPayloadHandlersEvent;
+import net.neoforged.neoforge.network.registration.PayloadRegistrar;
 
-public final class ModPackets {
-    private ModPackets() {
-    }
+public class ModPackets {
+    public static void register(RegisterPayloadHandlersEvent event) {
+        PayloadRegistrar registrar = event.registrar(BuilderToolsMod.MODID).versioned("1").optional();
 
-    /** Called from the common entry point. Registers codecs + global receivers. */
-    public static void register() {
-        // Client -> server codecs.
-        PayloadTypeRegistry.playC2S().register(SelectionFillPacket.TYPE, SelectionFillPacket.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(SelectionCopyPacket.TYPE, SelectionCopyPacket.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(PastePacket.TYPE, PastePacket.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(EntityTransformPacket.TYPE, EntityTransformPacket.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(EntitySpawnPacket.TYPE, EntitySpawnPacket.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(OffGridBlockPacket.TYPE, OffGridBlockPacket.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(EntityDeletePacket.TYPE, EntityDeletePacket.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(EntityDuplicatePacket.TYPE, EntityDuplicatePacket.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(PaintPacket.TYPE, PaintPacket.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(ScatterPacket.TYPE, ScatterPacket.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(SmoothPacket.TYPE, SmoothPacket.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(StretchPacket.TYPE, StretchPacket.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(UndoPacket.TYPE, UndoPacket.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(WorldSettingsPacket.TYPE, WorldSettingsPacket.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(PlayerAbilitiesPacket.TYPE, PlayerAbilitiesPacket.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(EntityFreezePacket.TYPE, EntityFreezePacket.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(BlockRotationPacket.TYPE, BlockRotationPacket.STREAM_CODEC);
-        PayloadTypeRegistry.playC2S().register(FreeBlockBreakPacket.TYPE, FreeBlockBreakPacket.STREAM_CODEC);
+        registrar.playToServer(SelectionFillPacket.TYPE, SelectionFillPacket.STREAM_CODEC, SelectionFillPacket::handle);
+        registrar.playToServer(SelectionCopyPacket.TYPE, SelectionCopyPacket.STREAM_CODEC, SelectionCopyPacket::handle);
+        registrar.playToServer(PastePacket.TYPE, PastePacket.STREAM_CODEC, PastePacket::handle);
+        registrar.playToServer(EntityTransformPacket.TYPE, EntityTransformPacket.STREAM_CODEC, EntityTransformPacket::handle);
+        registrar.playToServer(EntitySpawnPacket.TYPE, EntitySpawnPacket.STREAM_CODEC, EntitySpawnPacket::handle);
+        registrar.playToServer(EntityDeletePacket.TYPE, EntityDeletePacket.STREAM_CODEC, EntityDeletePacket::handle);
+        registrar.playToServer(EntityDuplicatePacket.TYPE, EntityDuplicatePacket.STREAM_CODEC, EntityDuplicatePacket::handle);
+        registrar.playToServer(PaintPacket.TYPE, PaintPacket.STREAM_CODEC, PaintPacket::handle);
+        registrar.playToServer(ScatterPacket.TYPE, ScatterPacket.STREAM_CODEC, ScatterPacket::handle);
+        registrar.playToServer(SmoothPacket.TYPE, SmoothPacket.STREAM_CODEC, SmoothPacket::handle);
+        registrar.playToServer(StretchPacket.TYPE, StretchPacket.STREAM_CODEC, StretchPacket::handle);
+        registrar.playToServer(UndoPacket.TYPE, UndoPacket.STREAM_CODEC, UndoPacket::handle);
+        registrar.playToServer(WorldSettingsPacket.TYPE, WorldSettingsPacket.STREAM_CODEC, WorldSettingsPacket::handle);
+        registrar.playToServer(PlayerAbilitiesPacket.TYPE, PlayerAbilitiesPacket.STREAM_CODEC, PlayerAbilitiesPacket::handle);
+        registrar.playToServer(EntityFreezePacket.TYPE, EntityFreezePacket.STREAM_CODEC, EntityFreezePacket::handle);
+        registrar.playToServer(OffGridBlockPacket.TYPE, OffGridBlockPacket.STREAM_CODEC, OffGridBlockPacket::handle);
+        registrar.playToServer(BlockRotationPacket.TYPE, BlockRotationPacket.STREAM_CODEC, BlockRotationPacket::handle);
+        registrar.playToServer(FreeBlockBreakPacket.TYPE, FreeBlockBreakPacket.STREAM_CODEC, FreeBlockBreakPacket::handle);
+        registrar.playToClient(RotationSyncPacket.TYPE, RotationSyncPacket.STREAM_CODEC, RotationSyncPacket::handle);
+        registrar.playToClient(SmoothTerrainTogglePacket.TYPE, SmoothTerrainTogglePacket.STREAM_CODEC, SmoothTerrainTogglePacket::handle);
+        // Two-way payload (client -> server keeps the command store in sync, server -> client
+        // applies expand/contract/shift). playBidirectional registers the type once for both flows.
+        registrar.playBidirectional(SelectionSyncPacket.TYPE, SelectionSyncPacket.STREAM_CODEC, SelectionSyncPacket::handle);
 
-        // Server -> client codecs (selection sync after expand/contract/shift + rotation layer).
-        PayloadTypeRegistry.playS2C().register(SelectionSyncPacket.TYPE, SelectionSyncPacket.STREAM_CODEC);
-        PayloadTypeRegistry.playS2C().register(RotationSyncPacket.TYPE, RotationSyncPacket.STREAM_CODEC);
-
-        // Server receivers.
-        ServerPlayNetworking.registerGlobalReceiver(SelectionFillPacket.TYPE, SelectionFillPacket::handle);
-        ServerPlayNetworking.registerGlobalReceiver(SelectionCopyPacket.TYPE, SelectionCopyPacket::handle);
-        ServerPlayNetworking.registerGlobalReceiver(PastePacket.TYPE, PastePacket::handle);
-        ServerPlayNetworking.registerGlobalReceiver(EntityTransformPacket.TYPE, EntityTransformPacket::handle);
-        ServerPlayNetworking.registerGlobalReceiver(OffGridBlockPacket.TYPE, OffGridBlockPacket::handle);
-        ServerPlayNetworking.registerGlobalReceiver(EntityDeletePacket.TYPE, EntityDeletePacket::handle);
-        ServerPlayNetworking.registerGlobalReceiver(EntityDuplicatePacket.TYPE, EntityDuplicatePacket::handle);
-        ServerPlayNetworking.registerGlobalReceiver(PaintPacket.TYPE, PaintPacket::handle);
-        ServerPlayNetworking.registerGlobalReceiver(ScatterPacket.TYPE, ScatterPacket::handle);
-        ServerPlayNetworking.registerGlobalReceiver(SmoothPacket.TYPE, SmoothPacket::handle);
-        ServerPlayNetworking.registerGlobalReceiver(StretchPacket.TYPE, StretchPacket::handle);
-        ServerPlayNetworking.registerGlobalReceiver(UndoPacket.TYPE, UndoPacket::handle);
-        ServerPlayNetworking.registerGlobalReceiver(WorldSettingsPacket.TYPE, WorldSettingsPacket::handle);
-        ServerPlayNetworking.registerGlobalReceiver(PlayerAbilitiesPacket.TYPE, PlayerAbilitiesPacket::handle);
-        ServerPlayNetworking.registerGlobalReceiver(EntityFreezePacket.TYPE, EntityFreezePacket::handle);
-        ServerPlayNetworking.registerGlobalReceiver(BlockRotationPacket.TYPE, BlockRotationPacket::handle);
-        ServerPlayNetworking.registerGlobalReceiver(FreeBlockBreakPacket.TYPE, FreeBlockBreakPacket::handle);
-        // Two-way: client -> server keeps the command store in sync, server -> client applies
-        // expand/contract/shift.
-        ServerPlayNetworking.registerGlobalReceiver(SelectionSyncPacket.TYPE, SelectionSyncPacket::handleServer);
-        ClientPlayNetworking.registerGlobalReceiver(SelectionSyncPacket.TYPE, SelectionSyncPacket::handleClient);
-        ClientPlayNetworking.registerGlobalReceiver(RotationSyncPacket.TYPE, RotationSyncPacket::handleClient);
     }
 }

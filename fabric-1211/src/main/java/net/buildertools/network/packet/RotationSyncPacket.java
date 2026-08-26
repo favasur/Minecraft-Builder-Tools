@@ -10,8 +10,7 @@ import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
-
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
@@ -62,8 +61,8 @@ public record RotationSyncPacket(BlockPos pos, BlockState state, float yaw, floa
         return TYPE;
     }
 
-    public static void handleClient(RotationSyncPacket payload, ClientPlayNetworking.Context ctx) {
-        ctx.client().execute(() -> RotationStore.applyClientSync(
+    public static void handle(RotationSyncPacket payload, IPayloadContext context) {
+        context.enqueueWork(() -> RotationStore.applyClientSync(
                 payload.pos(),
                 payload.remove() ? null
                         : new RotationData(payload.state(), payload.yaw(), payload.pitch(), payload.billboard(),

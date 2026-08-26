@@ -17,6 +17,23 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * NEW rotated block is unaffected - the layer entry is added after the cell is emptied.\n */
 @Mixin(Level.class)
 public abstract class LevelMixin {
+    /**
+     * Drops the cached smooth-terrain meshes that could be affected by the change. Runs on both
+     * sides (the client also calls setBlock when block updates arrive), so the mesh cache never
+     * serves stale geometry after a block edit. The mesh reaches 2 blocks beyond its section, so
+     * the whole surrounding halo of sections is invalidated.
+     */
+    @Inject(method = "setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z",
+            at = @At("HEAD"))
+    private void buildertools$invalidateMeshCache(BlockPos pos, BlockState newState, int flags, int recursionLeft,
+                                                  CallbackInfoReturnable<Boolean> cir) {
+        Level self = (Level) (Object) this;
+        if (self.getBlockState(pos) == newState) {
+            return;
+        }
+        io.github.favasur.smoothterrain.mesh.MeshCache.invalidateAround(self, pos);
+    }
+
     @Inject(method = "setBlock(Lnet/minecraft/core/BlockPos;Lnet/minecraft/world/level/block/state/BlockState;II)Z",
             at = @At("HEAD"))
     private void buildertools$cleanupRotation(BlockPos pos, BlockState newState, int flags, int recursionLeft,

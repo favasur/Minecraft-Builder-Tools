@@ -7,8 +7,8 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.world.entity.player.Player;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
@@ -53,10 +53,14 @@ public record BlockRotationPacket(BlockPos cell, double cx, double cy, double cz
         return TYPE;
     }
 
-    public static void handle(BlockRotationPacket payload, ServerPlayNetworking.Context ctx) {
-        ServerPlayer player = ctx.player();
-        player.server.execute(() -> BuilderServerHandler.handleBlockRotation(
-                player, payload.cell(), payload.cx(), payload.cy(), payload.cz(),
-                payload.yaw(), payload.pitch(), payload.billboard()));
+    public static void handle(BlockRotationPacket payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            if (player instanceof ServerPlayer serverPlayer) {
+                BuilderServerHandler.handleBlockRotation(serverPlayer, payload.cell(),
+                        payload.cx(), payload.cy(), payload.cz(),
+                        payload.yaw(), payload.pitch(), payload.billboard());
+            }
+        });
     }
 }

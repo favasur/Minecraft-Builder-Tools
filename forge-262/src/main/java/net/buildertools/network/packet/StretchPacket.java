@@ -8,7 +8,7 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
-import net.minecraftforge.event.network.CustomPayloadEvent;
+import net.minecraftforge.event.network.CustomPayloadEvent.Context;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
@@ -64,11 +64,11 @@ public record StretchPacket(int axis, boolean positive,
         return TYPE;
     }
 
-    public static void handle(StretchPacket payload, CustomPayloadEvent.Context context) {
+    public static void handle(StretchPacket payload, Context context) {
         context.enqueueWork(() -> {
-            ServerPlayer player = context.getSender();
-            if (player != null) {
-                BuilderServerHandler.stretchSelection(player, payload.axis(), payload.positive(),
+            ServerPlayer serverPlayer = context.getSender();
+            if (serverPlayer != null) {
+                BuilderServerHandler.stretchSelection(serverPlayer, payload.axis(), payload.positive(),
                         new BlockPos(payload.xMin(), payload.yMin(), payload.zMin()),
                         new BlockPos(payload.xMax(), payload.yMax(), payload.zMax()),
                         new BlockPos(payload.nxMin(), payload.nyMin(), payload.nzMin()),

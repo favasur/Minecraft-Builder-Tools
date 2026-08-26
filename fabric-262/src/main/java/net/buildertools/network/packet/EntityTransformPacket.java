@@ -7,8 +7,7 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
-
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
@@ -50,11 +49,13 @@ public record EntityTransformPacket(int entityId, double x, double y, double z, 
         return TYPE;
     }
 
-    public static void handle(EntityTransformPacket payload, ServerPlayNetworking.Context ctx) {
-        ServerPlayer player = ctx.player();
-        ctx.server().execute(() -> {
-                BuilderServerHandler.moveEntity(player, payload.entityId(),
+    public static void handle(EntityTransformPacket payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            if (player instanceof ServerPlayer serverPlayer) {
+                BuilderServerHandler.moveEntity(serverPlayer, payload.entityId(),
                         payload.x(), payload.y(), payload.z(), payload.yaw(), payload.pitch(), payload.headOnly());
+            }
         });
     }
 }

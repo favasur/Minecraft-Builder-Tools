@@ -1,22 +1,21 @@
 package net.buildertools.client;
 
 import com.mojang.blaze3d.platform.InputConstants;
-import net.buildertools.BuilderToolsMod;
 import net.minecraft.client.KeyMapping;
-import net.minecraft.resources.Identifier;
+import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
+import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.eventbus.api.listener.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
+import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 
 /**
- * Keybinding definitions. Registered on the MOD event bus via RegisterKeyMappingsEvent.
+ * Keybinding definitions. Registered on the MOD event bus (RegisterKeyMappingsEvent is an
+ * IModBusEvent), separate from {@link ClientEvents} which listens on the game bus.
  */
-@Mod.EventBusSubscriber(modid = BuilderToolsMod.MODID, value = Dist.CLIENT)
+@OnlyIn(Dist.CLIENT)
 public final class KeyBindings {
-    /** 26.2 groups keybindings by {@link KeyMapping.Category} instead of a lang key. */
-    public static final KeyMapping.Category CATEGORY =
-            KeyMapping.Category.register(Identifier.fromNamespaceAndPath(BuilderToolsMod.MODID, "category"));
+    public static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(
+            net.minecraft.resources.Identifier.fromNamespaceAndPath("buildertools", "buildertools"));
 
     // Selection tool
     public static final KeyMapping COPY = new KeyMapping("key.buildertools.copy", InputConstants.Type.KEYSYM, InputConstants.KEY_Y, CATEGORY);

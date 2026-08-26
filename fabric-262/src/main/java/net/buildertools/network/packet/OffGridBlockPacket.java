@@ -7,17 +7,18 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
-
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
 /**
- * Client -> Server: place or remove an off-grid (rotated) block. When {@code remove} is false the
- * block display is spawned at the cell with the given yaw; when true the display in that cell is
- * removed (and its item dropped).
+ * Client -> Server: place, re-rotate or remove an off-grid (rotated) block. The position is the
+ * block model's world-space CENTER (fractional - flush-adjacent blocks in a rotated stratum have
+ * fractional centers), so {@code remove} matches the block whose center is closest to it, and
+ * placement spawns the model centered there.
  */
-public record OffGridBlockPacket(double cx, double cy, double cz, float yaw, float pitch, boolean remove, boolean billboard)
+public record OffGridBlockPacket(double cx, double cy, double cz, float yaw, float pitch, boolean remove,
+                                 boolean billboard)
         implements CustomPacketPayload {
     public static final Type<OffGridBlockPacket> TYPE = new Type<>(Identifier.fromNamespaceAndPath(MODID, "offgrid_block"));
 
@@ -51,13 +52,16 @@ public record OffGridBlockPacket(double cx, double cy, double cz, float yaw, flo
         return TYPE;
     }
 
-    public static void handle(OffGridBlockPacket payload, ServerPlayNetworking.Context ctx) {
-        ServerPlayer player = ctx.player();
-        ctx.server().execute(() -> {
-            if (payload.remove()) {
-                BuilderServerHandler.removeOffGrid(player, payload.cx(), payload.cy(), payload.cz());
-            } else {
-                BuilderServerHandler.placeOffGrid(player, payload.cx(), payload.cy(), payload.cz(), payload.yaw(), payload.pitch(), payload.billboard());
+    public static void handle(OffGridBlockPacket payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            if (player instanceof ServerPlayer serverPlayer) {
+                if (payload.remove()) {
+                    BuilderServerHandler.removeOffGrid(serverPlayer, payload.cx(), payload.cy(), payload.cz());
+                } else {
+                    BuilderServerHandler.placeOffGrid(serverPlayer, payload.cx(), payload.cy(), payload.cz(),
+                            payload.yaw(), payload.pitch(), payload.billboard());
+                }
             }
         });
     }

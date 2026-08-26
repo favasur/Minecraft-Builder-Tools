@@ -14,6 +14,9 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -26,6 +29,7 @@ import java.util.function.Consumer;
  * searchable list of entities to spawn in front of the player, plus live yaw/pitch sliders that
  * rotate the currently selected entity (including off-grid blocks) in place.
  */
+@OnlyIn(Dist.CLIENT)
 public final class EntityToolScreen extends Screen {
     private static final int PANEL_W = 280;
     private static final int LIST_TOP = 64;
@@ -247,7 +251,7 @@ public final class EntityToolScreen extends Screen {
         // Spawn at the center of the block the player is looking at.
         ClientPackets.sendToServer(new EntitySpawnPacket(EntityType.getKey(type),
                 Math.floor(pos.x) + 0.5, Math.floor(pos.y), Math.floor(pos.z) + 0.5));
-        p.playSound(net.buildertools.registry.ModSounds.SET_CORNER_1, 1.0f, 1.0f);
+        p.playSound(net.buildertools.registry.ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
     }
 
     private float currentYaw() {

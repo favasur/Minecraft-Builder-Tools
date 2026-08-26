@@ -1,9 +1,8 @@
 package net.buildertools.client;
 
 import com.mojang.blaze3d.platform.InputConstants;
-import net.buildertools.BuilderToolsMod;
 import net.minecraft.client.KeyMapping;
-import net.minecraft.resources.Identifier;
+import net.minecraft.network.chat.Component;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.api.distmarker.OnlyIn;
 import net.neoforged.bus.api.SubscribeEvent;
@@ -15,9 +14,8 @@ import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
  */
 @OnlyIn(Dist.CLIENT)
 public final class KeyBindings {
-    /** 26.2 groups keybindings by {@link KeyMapping.Category} instead of a lang key. */
-    public static final KeyMapping.Category CATEGORY =
-            KeyMapping.Category.register(Identifier.fromNamespaceAndPath(BuilderToolsMod.MODID, "category"));
+    public static final KeyMapping.Category CATEGORY = KeyMapping.Category.register(
+            net.minecraft.resources.Identifier.fromNamespaceAndPath("buildertools", "buildertools"));
 
     // Selection tool
     public static final KeyMapping COPY = new KeyMapping("key.buildertools.copy", InputConstants.Type.KEYSYM, InputConstants.KEY_Y, CATEGORY);

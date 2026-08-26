@@ -7,8 +7,8 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.world.entity.player.Player;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
@@ -35,10 +35,12 @@ public record PastePacket(BlockPos anchor) implements CustomPacketPayload {
         return TYPE;
     }
 
-    public static void handle(PastePacket payload, ServerPlayNetworking.Context ctx) {
-        ServerPlayer player = ctx.player();
-        player.server.execute(() -> {
-                BuilderServerHandler.paste(player, payload.anchor());
+    public static void handle(PastePacket payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            if (player instanceof ServerPlayer serverPlayer) {
+                BuilderServerHandler.paste(serverPlayer, payload.anchor());
+            }
         });
     }
 }

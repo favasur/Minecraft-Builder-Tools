@@ -20,6 +20,7 @@
   "mixins": [
     "buildertools.mixins.json",
     "buildertools.flexiblepainting.mixins.json",
+    "buildertools.smoothterrain.mixins.json",
     "fullslabs.mixins.json"
   ],
   "depends": {

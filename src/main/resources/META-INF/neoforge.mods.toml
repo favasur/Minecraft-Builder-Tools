@@ -28,9 +28,6 @@ config="smoothterrain.mixins.json"
 config="fullslabs.mixins.json"
 
 [[mixins]]
-config="fullslabs.neoforge.mixins.json"
-
-[[mixins]]
 config="buildertools.flexiblepainting.mixins.json"
 
 [[mods]]

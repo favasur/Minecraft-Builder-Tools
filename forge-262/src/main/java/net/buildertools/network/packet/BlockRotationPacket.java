@@ -8,7 +8,7 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
-import net.minecraftforge.event.network.CustomPayloadEvent;
+import net.minecraftforge.event.network.CustomPayloadEvent.Context;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
@@ -53,10 +53,10 @@ public record BlockRotationPacket(BlockPos cell, double cx, double cy, double cz
         return TYPE;
     }
 
-    public static void handle(BlockRotationPacket payload, CustomPayloadEvent.Context context) {
+    public static void handle(BlockRotationPacket payload, Context context) {
         context.enqueueWork(() -> {
-            Player player = context.getSender();
-            if (player instanceof ServerPlayer serverPlayer) {
+            ServerPlayer serverPlayer = context.getSender();
+            if (serverPlayer != null) {
                 BuilderServerHandler.handleBlockRotation(serverPlayer, payload.cell(),
                         payload.cx(), payload.cy(), payload.cz(),
                         payload.yaw(), payload.pitch(), payload.billboard());

@@ -7,7 +7,7 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
-import net.minecraftforge.event.network.CustomPayloadEvent;
+import net.minecraftforge.event.network.CustomPayloadEvent.Context;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
@@ -43,11 +43,11 @@ public record EntitySpawnPacket(Identifier entityType, double x, double y, doubl
         return TYPE;
     }
 
-    public static void handle(EntitySpawnPacket payload, CustomPayloadEvent.Context context) {
+    public static void handle(EntitySpawnPacket payload, Context context) {
         context.enqueueWork(() -> {
-            ServerPlayer player = context.getSender();
-            if (player != null) {
-                BuilderServerHandler.spawnEntity(player, payload.entityType(),
+            ServerPlayer serverPlayer = context.getSender();
+            if (serverPlayer != null) {
+                BuilderServerHandler.spawnEntity(serverPlayer, payload.entityType(),
                         payload.x(), payload.y(), payload.z());
             }
         });

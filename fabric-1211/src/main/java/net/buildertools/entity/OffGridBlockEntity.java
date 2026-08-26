@@ -10,7 +10,6 @@ import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityDimensions;
@@ -20,6 +19,7 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
@@ -232,8 +232,8 @@ public class OffGridBlockEntity extends Entity {
         BlockState state = getRepresentedState();
         boolean creative = source.getEntity() instanceof Player player && player.getAbilities().instabuild;
         if (!creative && !state.isAir()) {
-            this.level().playSound(null, this.getX(), this.getY(), this.getZ(),
-                    state.getSoundType().getBreakSound(), SoundSource.BLOCKS, 1.0f, 0.9f);
+            this.level().levelEvent(2001, BlockPos.containing(this.getX(), this.getY(), this.getZ()),
+                    Block.getId(state));
             this.level().addFreshEntity(new ItemEntity(this.level(),
                     this.getX(), this.getY() + 0.25, this.getZ(),
                     new ItemStack(state.getBlock())));

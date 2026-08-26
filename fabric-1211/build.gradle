@@ -17,23 +17,26 @@ sourceSets {
     main {
         java.srcDir('../shared/flexiblepainting-1211/src/main/java')
         java.srcDir('../shared/fullslabs-1211/src/main/java')
-        java.srcDir('../src/main/java/io/github/favasur/fullslabs')
-        java.exclude 'FullSlabs.java'
-        java.exclude 'SlabRegistry.java'
-        java.exclude 'config/Controls.java'
-        java.exclude 'variants/VariantRegistry.java'
-        java.exclude 'client/models/MixedSlabModel.java'
-        java.exclude 'client/variants/VariantModelBaker.java'
-        java.exclude 'loot/**'
-        java.exclude 'compat/**'
-        java.exclude 'config/neoforge/**'
-        java.exclude 'neoforge/**'
-    }
-}
-
-tasks.named('processResources') {
-    from('../src/main/resources') {
-        include 'assets/fullslabs/**'
+        // Canonical FullSlabs + Smooth Terrain sources. Only the NeoForge loader/render/network
+        // entrypoints are excluded here (the module supplies Fabric adapters). The FullSlabs
+        // mixin tree MUST stay in the Fabric build (fullslabs.mixins.json references it), so the
+        // exclusions are explicit per canonical tree rather than a global 'mixin/**' pattern that
+        // would silently drop it and crash the game at mixin prepare. The 1.21.1 graft is a pure
+        // mixin graft (SlabVertical/SlabBlockMixin + the vanilla-only VerticalSlabModel), so only
+        // the two loader-neutral bootstrap files come from shared/fullslabs-1211.
+        java.srcDir('../src/main/java/io/github/favasur')
+        java.exclude 'smoothterrain/client/**'
+        java.exclude 'smoothterrain/hooks/ClientHooks.java'
+        java.exclude 'smoothterrain/hooks/Hooks.java'
+        java.exclude 'smoothterrain/network/**'
+        java.exclude 'smoothterrain/neoforge/**'
+        java.exclude 'smoothterrain/mixin/**'
+        java.exclude 'smoothterrain/compat/**'
+        java.exclude 'smoothterrain/config/neoforge/**'
+        java.exclude 'smoothterrain/config/SmoothTerrainConfigImpl.java'
+        java.exclude 'fullslabs/FullSlabs.java'
+        java.exclude 'fullslabs/config/Controls.java'
+        java.exclude 'fullslabs/neoforge/**'
     }
 }
 

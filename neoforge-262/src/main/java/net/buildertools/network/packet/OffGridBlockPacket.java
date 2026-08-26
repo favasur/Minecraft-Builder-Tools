@@ -12,11 +12,13 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import static net.buildertools.BuilderToolsMod.MODID;
 
 /**
- * Client -> Server: place or remove an off-grid (rotated) block. When {@code remove} is false the
- * block display is spawned at the cell with the given yaw; when true the display in that cell is
- * removed (and its item dropped).
+ * Client -> Server: place, re-rotate or remove an off-grid (rotated) block. The position is the
+ * block model's world-space CENTER (fractional - flush-adjacent blocks in a rotated stratum have
+ * fractional centers), so {@code remove} matches the block whose center is closest to it, and
+ * placement spawns the model centered there.
  */
-public record OffGridBlockPacket(double cx, double cy, double cz, float yaw, float pitch, boolean remove, boolean billboard)
+public record OffGridBlockPacket(double cx, double cy, double cz, float yaw, float pitch, boolean remove,
+                                 boolean billboard)
         implements CustomPacketPayload {
     public static final Type<OffGridBlockPacket> TYPE = new Type<>(Identifier.fromNamespaceAndPath(MODID, "offgrid_block"));
 
@@ -57,7 +59,8 @@ public record OffGridBlockPacket(double cx, double cy, double cz, float yaw, flo
                 if (payload.remove()) {
                     BuilderServerHandler.removeOffGrid(serverPlayer, payload.cx(), payload.cy(), payload.cz());
                 } else {
-                    BuilderServerHandler.placeOffGrid(serverPlayer, payload.cx(), payload.cy(), payload.cz(), payload.yaw(), payload.pitch(), payload.billboard());
+                    BuilderServerHandler.placeOffGrid(serverPlayer, payload.cx(), payload.cy(), payload.cz(),
+                            payload.yaw(), payload.pitch(), payload.billboard());
                 }
             }
         });

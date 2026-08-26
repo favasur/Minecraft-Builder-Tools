@@ -8,12 +8,15 @@ import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 
 /**
  * The "free move" entity drag: with an entity selected, hold the right mouse button on it and
  * move the mouse — the entity follows the cursor along a horizontal plane. "Lock to Surface" keeps
  * it grounded; "Grid Snap" snaps its position to the configured grid size.
  */
+@OnlyIn(Dist.CLIENT)
 public final class EntityDragState {
     private static Entity entity;
     private static double planeY;
@@ -84,6 +87,5 @@ public final class EntityDragState {
         lastSent = next;
         ClientPackets.sendToServer(new EntityTransformPacket(
                 entity.getId(), x, y, z, entity.getYRot(), entity.getXRot(), false));
-
     }
 }

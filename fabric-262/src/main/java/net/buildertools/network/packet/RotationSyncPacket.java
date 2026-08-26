@@ -10,8 +10,7 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
-
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
@@ -19,9 +18,11 @@ import static net.buildertools.BuilderToolsMod.MODID;
  * Server -> Client: one rotated block of the mod's layer changed ({@code remove} = the block there
  * is gone). Carries the block's real state so the client can render it with full shading, collide
  * with it and show its rotation. Applied to the client mirror.
- */public record RotationSyncPacket(BlockPos pos, BlockState state, float yaw, float pitch,
+ */
+public record RotationSyncPacket(BlockPos pos, BlockState state, float yaw, float pitch,
                                  boolean billboard, boolean remove,
-                                 double cx, double cy, double cz) implements CustomPacketPayload {
+                                 double cx, double cy, double cz)
+        implements CustomPacketPayload {
     public static final Type<RotationSyncPacket> TYPE = new Type<>(Identifier.fromNamespaceAndPath(MODID, "rotation_sync"));
 
     public static final StreamCodec<FriendlyByteBuf, RotationSyncPacket> STREAM_CODEC = new StreamCodec<>() {
@@ -60,8 +61,8 @@ import static net.buildertools.BuilderToolsMod.MODID;
         return TYPE;
     }
 
-    public static void handleClient(RotationSyncPacket payload, ClientPlayNetworking.Context ctx) {
-        ctx.client().execute(() -> RotationStore.applyClientSync(
+    public static void handle(RotationSyncPacket payload, IPayloadContext context) {
+        context.enqueueWork(() -> RotationStore.applyClientSync(
                 payload.pos(),
                 payload.remove() ? null
                         : new RotationData(payload.state(), payload.yaw(), payload.pitch(), payload.billboard(),

@@ -5,11 +5,9 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.block.model.BakedQuad;
-import net.minecraft.client.renderer.texture.OverlayTexture;
-import net.minecraft.client.resources.model.BakedModel;
-import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.util.RandomSource;
+import net.minecraft.client.renderer.texture.OverlayTexture;
+import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.BlockAndTintGetter;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
@@ -45,37 +43,32 @@ public final class RotatedBlockRendering {
      *               translated by {@code center - 0.5}, matching how {@link RotatedBlockModel}
      *               bakes its geometry)
      */
-    public static void render(BakedModel model, BlockState state, BlockPos pos, Vec3 center,
+    public static void render(RotatedBlockModel model, BlockState state, BlockPos pos, Vec3 center,
                               PoseStack poseStack, VertexConsumer consumer, BlockAndTintGetter level) {
         Vec3 offset = state.getOffset(level, pos);
         if (offset.x != 0.0 || offset.y != 0.0 || offset.z != 0.0) {
             poseStack.translate(offset.x, offset.y, offset.z);
         }
-        RandomSource random = RandomSource.create();
-        long seed = state.getSeed(pos);
         PoseStack.Pose pose = poseStack.last();
-        for (Direction direction : Direction.values()) {
-            random.setSeed(seed);
-            renderQuads(model, state, pos, center, offset, pose, consumer, level, random, direction);
-        }
-        random.setSeed(seed);
-        renderQuads(model, state, pos, center, offset, pose, consumer, level, random, null);
+        renderQuadList(state, pos, center, offset, pose, consumer, level,
+                model.allQuads(state, state.getSeed(pos)));
     }
 
-    private static void renderQuads(BakedModel model, BlockState state, BlockPos pos, Vec3 center,
-                                    Vec3 offset, PoseStack.Pose pose, VertexConsumer consumer,
-                                    BlockAndTintGetter level, RandomSource random, Direction direction) {
-        List<BakedQuad> quads = model.getQuads(state, direction, random);
+    private static void renderQuadList(BlockState state, BlockPos pos, Vec3 center, Vec3 offset,
+                                       PoseStack.Pose pose, VertexConsumer consumer,
+                                       BlockAndTintGetter level, List<BakedQuad> quads) {
         if (quads.isEmpty()) {
             return;
         }
         float[] normal = new float[3];
         int[] lights = new int[4];
         for (BakedQuad quad : quads) {
+            // The positions in DefaultVertexFormat.BLOCK are already block-local 0..1 values;
+            // dividing them by 16 here sampled almost the entire face at the block centre and
+            // made the apparent lighting change as the camera crossed a cell boundary.
             quadNormal(quad, normal);
             float shade = quad.isShade() ? smoothShade(normal[0], normal[1], normal[2]) : 1.0F;
 
-            // Quad tint (grass, leaves, ...): same source vanilla's ModelBlockRenderer uses.
             float tr = 1.0F;
             float tg = 1.0F;
             float tb = 1.0F;
@@ -92,18 +85,45 @@ public final class RotatedBlockRendering {
                 int o = i * 8;
                 // Nudge the corner a hair along the face normal so the sampled cell is the one
                 // the face points into (open air for exposed faces, the wall for touching faces).
-                double wx = center.x - 0.5 + offset.x + Float.intBitsToFloat(v[o]) / 16.0
+                double wx = center.x - 0.5 + offset.x + Float.intBitsToFloat(v[o])
                         + normal[0] * LIGHT_NUDGE;
-                double wy = center.y - 0.5 + offset.y + Float.intBitsToFloat(v[o + 1]) / 16.0
+                double wy = center.y - 0.5 + offset.y + Float.intBitsToFloat(v[o + 1])
                         + normal[1] * LIGHT_NUDGE;
-                double wz = center.z - 0.5 + offset.z + Float.intBitsToFloat(v[o + 2]) / 16.0
+                double wz = center.z - 0.5 + offset.z + Float.intBitsToFloat(v[o + 2])
                         + normal[2] * LIGHT_NUDGE;
                 lights[i] = LevelRenderer.getLightColor(level, state, BlockPos.containing(wx, wy, wz));
             }
-            consumer.putBulkData(pose, quad,
-                    new float[]{shade, shade, shade, shade},
-                    tr, tg, tb, 1.0F, lights, OverlayTexture.NO_OVERLAY, true);
+
+            // Emit the vertex fields directly instead of using VertexConsumer#putBulkData.
+            // putBulkData reconstructs the normal from BakedQuad#getDirection (an axis-snapped
+            // value) and optionally overwrites it with the quad's packed normal. That is correct
+            // for vanilla blocks, but makes an arbitrarily rotated model use a camera/axis
+            // dependent normal. This path keeps the exact world-space normal and lightmap stable.
+            for (int i = 0; i < 4; i++) {
+                int o = i * 8;
+                int packedColor = v[o + 3];
+                float vr = ((packedColor >> 16) & 0xFF) / 255.0F;
+                float vg = ((packedColor >> 8) & 0xFF) / 255.0F;
+                float vb = (packedColor & 0xFF) / 255.0F;
+                float va = ((packedColor >>> 24) & 0xFF) / 255.0F;
+                int light = combineLight(lights[i], v[o + 6]);
+                consumer.addVertex(pose,
+                                Float.intBitsToFloat(v[o]),
+                                Float.intBitsToFloat(v[o + 1]),
+                                Float.intBitsToFloat(v[o + 2]))
+                        .setColor(vr * shade * tr, vg * shade * tg, vb * shade * tb, va)
+                        .setUv(Float.intBitsToFloat(v[o + 4]), Float.intBitsToFloat(v[o + 5]))
+                        .setOverlay(OverlayTexture.NO_OVERLAY)
+                        .setLight(light)
+                        .setNormal(pose, normal[0], normal[1], normal[2]);
+            }
         }
+    }
+
+    private static int combineLight(int sampled, int baked) {
+        int block = Math.max(sampled & 0xFFFF, baked & 0xFFFF);
+        int sky = Math.max((sampled >>> 16) & 0xFFFF, (baked >>> 16) & 0xFFFF);
+        return block | (sky << 16);
     }
 
     /** World-space unit normal of the quad, computed from its (pre-rotated) geometry. */
@@ -129,9 +149,21 @@ public final class RotatedBlockRendering {
             out[2] = d.step().z();
             return;
         }
-        out[0] = nx / len;
-        out[1] = ny / len;
-        out[2] = nz / len;
+        nx /= len;
+        ny /= len;
+        nz /= len;
+        // Preserve the baked quad's winding. Some model loaders emit the four vertices in the
+        // opposite order; without this correction the same face is lit from its back side and the
+        // result appears to change when the camera moves around it.
+        Direction d = quad.getDirection();
+        if (nx * d.step().x() + ny * d.step().y() + nz * d.step().z() < 0.0F) {
+            nx = -nx;
+            ny = -ny;
+            nz = -nz;
+        }
+        out[0] = nx;
+        out[1] = ny;
+        out[2] = nz;
     }
 
     /**

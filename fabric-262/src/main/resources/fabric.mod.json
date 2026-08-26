@@ -11,7 +11,8 @@
   "environment": "*",
   "entrypoints": {
     "main": [
-      "net.buildertools.BuilderToolsMod"
+      "net.buildertools.BuilderToolsMod",
+      "io.github.favasur.fullslabs.fabric.FullSlabsFabric"
     ],
     "client": [
       "net.buildertools.BuilderToolsModClient"
@@ -19,7 +20,9 @@
   },
   "mixins": [
     "buildertools.mixins.json",
-    "buildertools.flexiblepainting.mixins.json"
+    "buildertools.flexiblepainting.mixins.json",
+    "buildertools.smoothterrain.mixins.json",
+    "fullslabs.mixins.json"
   ],
   "depends": {
     "fabricloader": ">=0.19.0",

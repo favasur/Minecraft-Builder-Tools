@@ -35,4 +35,8 @@ public class ModItems {
 
     public static final DeferredItem<PaintToolItem> PAINT_TOOL = ITEMS.register("paint_tool",
             () -> new PaintToolItem(new Item.Properties().stacksTo(1)));
+
+    /** Hidden item whose model is the 3D paint brush; it backs the in-hand brush renderer. */
+    public static final DeferredItem<Item> BRUSH_PROXY = ITEMS.register("builder_brush",
+            () -> new Item(new Item.Properties().stacksTo(1)));
 }

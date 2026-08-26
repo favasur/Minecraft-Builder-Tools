@@ -8,13 +8,14 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
-import net.minecraftforge.event.network.CustomPayloadEvent;
+import net.minecraftforge.event.network.CustomPayloadEvent.Context;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
 /**
- * Client -> Server: break the rotated block in the given cell of the mod's layer (drops its item
- * in survival, like breaking a normal block).
+ * Client -> Server: break the rotated block in the given cell of the mod's layer (the cell is
+ * air in the vanilla grid). The server drops the block's item in survival and removes the entry,
+ * exactly like breaking a normal block.
  */
 public record FreeBlockBreakPacket(BlockPos cell) implements CustomPacketPayload {
     public static final Type<FreeBlockBreakPacket> TYPE = new Type<>(Identifier.fromNamespaceAndPath(MODID, "free_block_break"));
@@ -36,10 +37,10 @@ public record FreeBlockBreakPacket(BlockPos cell) implements CustomPacketPayload
         return TYPE;
     }
 
-    public static void handle(FreeBlockBreakPacket payload, CustomPayloadEvent.Context context) {
+    public static void handle(FreeBlockBreakPacket payload, Context context) {
         context.enqueueWork(() -> {
-            Player player = context.getSender();
-            if (player instanceof ServerPlayer serverPlayer) {
+            ServerPlayer serverPlayer = context.getSender();
+            if (serverPlayer != null) {
                 BuilderServerHandler.handleFreeBlockBreak(serverPlayer, payload.cell());
             }
         });

@@ -8,14 +8,14 @@
     "PlayerMixin",
     "LocalPlayerMixin",
     "MouseHandlerMixin",
+    "MultiPlayerGameModeMixin",
+    "MinecraftMixin",
     "ItemRendererMixin",
     "DisplayAccessor",
     "BlockDisplayAccessor",
     "BlockGetterMixin",
     "CollisionGetterMixin",
-    "ServerGamePacketListenerImplMixin",
-    "LevelMixin",
-    "ClientPlayerInteractionManagerMixin"
+    "LevelMixin"
   ],
   "injectors": {
     "defaultRequire": 1

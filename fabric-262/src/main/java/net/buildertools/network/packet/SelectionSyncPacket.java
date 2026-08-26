@@ -2,21 +2,22 @@ package net.buildertools.network.packet;
 
 import net.buildertools.selection.SelectionManager;
 import net.buildertools.server.SelectionStore;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.FriendlyByteBuf;
 import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.PacketFlow;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.player.Player;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
 /**
  * Syncs the selection region between client and server (client -> server keeps the command store
  * up to date; server -> client updates the in-world box after expand/contract/shift). The region
- * is sent as a min/max box of six ints.
+ * is sent as a min/max box of six ints (BuilderToolSelectionUpdate style).
  */
 public record SelectionSyncPacket(boolean hasSelection, int xMin, int yMin, int zMin,
                                   int xMax, int yMax, int zMax) implements CustomPacketPayload {
@@ -55,23 +56,34 @@ public record SelectionSyncPacket(boolean hasSelection, int xMin, int yMin, int 
         return TYPE;
     }
 
+    /** Routes to the correct side: server stores the selection, client applies it. */
+    public static void handle(SelectionSyncPacket payload, IPayloadContext context) {
+        if (context.flow() == PacketFlow.SERVERBOUND) {
+            handleServer(payload, context);
+        } else {
+            handleClient(payload, context);
+        }
+    }
+
     /** Client -> server: store the selection for the /builder commands. */
-    public static void handleServer(SelectionSyncPacket payload, ServerPlayNetworking.Context ctx) {
-        ServerPlayer player = ctx.player();
-        ctx.server().execute(() -> {
-            if (payload.hasSelection()) {
-                SelectionStore.set(player,
-                        new BlockPos(payload.xMin(), payload.yMin(), payload.zMin()),
-                        new BlockPos(payload.xMax(), payload.yMax(), payload.zMax()));
-            } else {
-                SelectionStore.clear(player);
+    public static void handleServer(SelectionSyncPacket payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            if (player instanceof ServerPlayer serverPlayer) {
+                if (payload.hasSelection()) {
+                    SelectionStore.set(serverPlayer,
+                            new BlockPos(payload.xMin(), payload.yMin(), payload.zMin()),
+                            new BlockPos(payload.xMax(), payload.yMax(), payload.zMax()));
+                } else {
+                    SelectionStore.clear(serverPlayer);
+                }
             }
         });
     }
 
     /** Server -> client: apply a region change made by a command (expand/contract/shift). */
-    public static void handleClient(SelectionSyncPacket payload, ClientPlayNetworking.Context ctx) {
-        ctx.client().execute(() -> {
+    public static void handleClient(SelectionSyncPacket payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
             if (payload.hasSelection()) {
                 SelectionManager.applyServerSync(
                         new BlockPos(payload.xMin(), payload.yMin(), payload.zMin()),

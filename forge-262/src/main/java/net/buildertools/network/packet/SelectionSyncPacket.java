@@ -8,7 +8,8 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraftforge.event.network.CustomPayloadEvent;
+import net.minecraft.world.entity.player.Player;
+import net.minecraftforge.event.network.CustomPayloadEvent.Context;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
@@ -54,24 +55,33 @@ public record SelectionSyncPacket(boolean hasSelection, int xMin, int yMin, int 
         return TYPE;
     }
 
+    /** Routes to the correct side: server stores the selection, client applies it. */
+    public static void handle(SelectionSyncPacket payload, Context context) {
+        if (context.isServerSide()) {
+            handleServer(payload, context);
+        } else {
+            handleClient(payload, context);
+        }
+    }
+
     /** Client -> server: store the selection for the /builder commands. */
-    public static void handleServer(SelectionSyncPacket payload, CustomPayloadEvent.Context context) {
+    public static void handleServer(SelectionSyncPacket payload, Context context) {
         context.enqueueWork(() -> {
-            ServerPlayer player = context.getSender();
-            if (player != null) {
+            ServerPlayer serverPlayer = context.getSender();
+            if (serverPlayer != null) {
                 if (payload.hasSelection()) {
-                    SelectionStore.set(player,
+                    SelectionStore.set(serverPlayer,
                             new BlockPos(payload.xMin(), payload.yMin(), payload.zMin()),
                             new BlockPos(payload.xMax(), payload.yMax(), payload.zMax()));
                 } else {
-                    SelectionStore.clear(player);
+                    SelectionStore.clear(serverPlayer);
                 }
             }
         });
     }
 
     /** Server -> client: apply a region change made by a command (expand/contract/shift). */
-    public static void handleClient(SelectionSyncPacket payload, CustomPayloadEvent.Context context) {
+    public static void handleClient(SelectionSyncPacket payload, Context context) {
         context.enqueueWork(() -> {
             if (payload.hasSelection()) {
                 SelectionManager.applyServerSync(

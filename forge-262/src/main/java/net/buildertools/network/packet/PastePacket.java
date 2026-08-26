@@ -8,7 +8,7 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
-import net.minecraftforge.event.network.CustomPayloadEvent;
+import net.minecraftforge.event.network.CustomPayloadEvent.Context;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
@@ -35,11 +35,11 @@ public record PastePacket(BlockPos anchor) implements CustomPacketPayload {
         return TYPE;
     }
 
-    public static void handle(PastePacket payload, CustomPayloadEvent.Context context) {
+    public static void handle(PastePacket payload, Context context) {
         context.enqueueWork(() -> {
-            ServerPlayer player = context.getSender();
-            if (player != null) {
-                BuilderServerHandler.paste(player, payload.anchor());
+            ServerPlayer serverPlayer = context.getSender();
+            if (serverPlayer != null) {
+                BuilderServerHandler.paste(serverPlayer, payload.anchor());
             }
         });
     }

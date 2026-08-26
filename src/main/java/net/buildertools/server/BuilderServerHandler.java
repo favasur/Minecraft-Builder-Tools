@@ -38,6 +38,7 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
 import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
@@ -505,13 +506,8 @@ public final class BuilderServerHandler {
             sendError(player, "Hold a block in your main hand to place.");
             return;
         }
-        BlockState state = blockItem.getBlock().defaultBlockState();
-        if (state.getBlock() instanceof io.github.favasur.fullslabs.block.VerticalSlabBlock vertical) {
-            state = vertical.defaultBlockState();
-        } else if (state.getBlock() instanceof net.minecraft.world.level.block.SlabBlock slab
-                && io.github.favasur.fullslabs.block.VerticalSlabBlock.hasVertical(slab)) {
-            state = io.github.favasur.fullslabs.block.VerticalSlabBlock.getVertical(slab).defaultBlockState();
-        }
+        BlockState state = io.github.favasur.fullslabs.block.SlabVertical.vertical(
+                blockItem.getBlock().defaultBlockState());
         VoxelShape shape = state.getCollisionShape(level, BlockPos.ZERO);
         if (player.getBoundingBox().intersects(OffGridTransform.boxAround(cx, cy, cz, yaw, pitch, shape.bounds()))) {
             sendError(player, "You're in the way - move back first.");
@@ -588,8 +584,8 @@ public final class BuilderServerHandler {
         if (player.distanceToSqr(Vec3.atCenterOf(cell)) > MAX_DISTANCE * MAX_DISTANCE) {
             return;
         }
+        BlockState state = data.state();
         if (!player.getAbilities().instabuild) {
-            BlockState state = data.state();
             if (state != null && !state.isAir()) {
                 level.addFreshEntity(new ItemEntity(level,
                         cell.getX() + 0.5, cell.getY() + 0.5, cell.getZ() + 0.5,
@@ -597,6 +593,9 @@ public final class BuilderServerHandler {
             }
         }
         RotationStore.remove(level, cell);
+        if (state != null && !state.isAir()) {
+            level.levelEvent(2001, cell, Block.getId(state));
+        }
         playSound(player, ModSounds.SET_CORNER_2.get());
     }
 
@@ -701,8 +700,8 @@ public final class BuilderServerHandler {
         if (block == null) {
             return;
         }
+        BlockState state = block.getRepresentedState();
         if (!player.getAbilities().instabuild) {
-            BlockState state = block.getRepresentedState();
             if (!state.isAir()) {
                 level.addFreshEntity(new ItemEntity(level,
                         cx, cy + 0.25, cz,
@@ -710,6 +709,9 @@ public final class BuilderServerHandler {
             }
         }
         block.discardWithDisplay();
+        if (!state.isAir()) {
+            level.levelEvent(2001, BlockPos.containing(cx, cy, cz), Block.getId(state));
+        }
         playSound(player, ModSounds.SET_CORNER_2.get());
     }
 

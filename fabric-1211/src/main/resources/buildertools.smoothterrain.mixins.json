@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "io.github.favasur.smoothterrain.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "EntityMixin"
+  ],
+  "client": [
+    "client.VideoSettingsScreenMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

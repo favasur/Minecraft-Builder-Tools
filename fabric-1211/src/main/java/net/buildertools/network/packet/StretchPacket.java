@@ -7,8 +7,8 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerPlayer;
-
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.world.entity.player.Player;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
@@ -64,14 +64,16 @@ public record StretchPacket(int axis, boolean positive,
         return TYPE;
     }
 
-    public static void handle(StretchPacket payload, ServerPlayNetworking.Context ctx) {
-        ServerPlayer player = ctx.player();
-        player.server.execute(() -> {
-                BuilderServerHandler.stretchSelection(player, payload.axis(), payload.positive(),
+    public static void handle(StretchPacket payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            if (player instanceof ServerPlayer serverPlayer) {
+                BuilderServerHandler.stretchSelection(serverPlayer, payload.axis(), payload.positive(),
                         new BlockPos(payload.xMin(), payload.yMin(), payload.zMin()),
                         new BlockPos(payload.xMax(), payload.yMax(), payload.zMax()),
                         new BlockPos(payload.nxMin(), payload.nyMin(), payload.nzMin()),
                         new BlockPos(payload.nxMax(), payload.nyMax(), payload.nzMax()));
+            }
         });
     }
 }

@@ -1,9 +1,14 @@
 package net.buildertools.server;
 
+import net.buildertools.util.OffGridTransform;
+import net.buildertools.flexiblepainting.api.FlexiblePaintingAccess;
+import net.buildertools.util.RotationData;
+import net.buildertools.entity.OffGridBlockEntity;
+import net.buildertools.mixin.BlockDisplayAccessor;
+import net.buildertools.registry.ModEntities;
+import net.buildertools.mixin.DisplayAccessor;
 import net.buildertools.network.packet.SelectionSyncPacket;
 import net.buildertools.registry.ModSounds;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import net.minecraft.commands.arguments.blocks.BlockStateParser;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -11,7 +16,6 @@ import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.resources.ResourceLocation;
@@ -20,33 +24,30 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.Mob;
 import net.minecraft.world.entity.MobSpawnType;
-import net.minecraft.world.entity.EntityType;
-import net.buildertools.util.OffGridTransform;
-import net.buildertools.util.RotationData;
-import net.buildertools.entity.OffGridBlockEntity;
-import net.buildertools.registry.ModEntities;
-import net.buildertools.mixin.BlockDisplayAccessor;
-import net.buildertools.mixin.DisplayAccessor;
-import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.phys.AABB;
-import org.joml.Quaternionf;
-import org.joml.Vector3f;
 import net.minecraft.world.entity.player.Abilities;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.decoration.Painting;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.component.CustomData;
+import net.minecraft.world.level.GameRules;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import org.joml.Quaternionf;
+import org.joml.Vector3f;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -76,8 +77,6 @@ public final class BuilderServerHandler {
      *  vanilla placement that arrives alongside the mod's OffGridBlockPacket. */
     private static final Map<UUID, RecentOffGrid> RECENT_OFF_GRID = new HashMap<>();
 
-    private static final Logger LOGGER = LogManager.getLogger("BuilderTools");
-
     private BuilderServerHandler() {
     }
 
@@ -85,15 +84,10 @@ public final class BuilderServerHandler {
         player.sendSystemMessage(Component.literal("[Builder] " + message));
     }
 
-    /** Logs a placement confirmation at debug level instead of spamming chat. */
-    static void sendDebug(ServerPlayer player, String message) {
-        LOGGER.debug("[Builder] {}: {}", player.getScoreboardName(), message);
-    }
-
     /** Sends a message and plays the error sound. */
     static void sendError(ServerPlayer player, String message) {
         sendMessage(player, message);
-        playSound(player, ModSounds.ERROR);
+        playSound(player, ModSounds.ERROR.get());
     }
 
     /** Plays a sound only for the acting player (ported sound set). */
@@ -129,7 +123,7 @@ public final class BuilderServerHandler {
 
         UndoStore.push(player, changes);
         sendMessage(player, "Filled " + changes.size() + " block(s).");
-        playSound(player, ModSounds.FILL);
+        playSound(player, ModSounds.FILL.get());
     }
 
     /**
@@ -213,10 +207,10 @@ public final class BuilderServerHandler {
         UndoStore.push(player, changes);
         // Keep the region (and the client's selection box) at the new size.
         SelectionStore.setRegion(player, nMin, nMax);
-        ServerPlayNetworking.send(player, new SelectionSyncPacket(
+        net.buildertools.network.FabricNetwork.sendToPlayer(player, new SelectionSyncPacket(
                 true, nMin.getX(), nMin.getY(), nMin.getZ(), nMax.getX(), nMax.getY(), nMax.getZ()));
         sendMessage(player, "Stretched " + changes.size() + " block(s).");
-        playSound(player, ModSounds.FILL);
+        playSound(player, ModSounds.FILL.get());
     }
 
     /** Returns the given axis coordinate of a position (0=x, 1=y, 2=z). */
@@ -265,7 +259,7 @@ public final class BuilderServerHandler {
         }
         UndoStore.push(player, changes);
         sendMessage(player, "Painted " + changes.size() + " block(s).");
-        playSound(player, ModSounds.PAINT);
+        playSound(player, ModSounds.PAINT.get());
     }
 
     public static void scatter(ServerPlayer player, BlockPos center) {
@@ -295,7 +289,7 @@ public final class BuilderServerHandler {
         }
         UndoStore.push(player, changes);
         sendMessage(player, "Scattered " + changes.size() + " block(s).");
-        playSound(player, ModSounds.SCATTER);
+        playSound(player, ModSounds.SCATTER.get());
     }
 
     public static void smooth(ServerPlayer player, BlockPos center) {
@@ -362,7 +356,7 @@ public final class BuilderServerHandler {
         }
         UndoStore.push(player, changes);
         sendMessage(player, "Smoothed " + changes.size() + " block(s).");
-        playSound(player, ModSounds.SMOOTH);
+        playSound(player, ModSounds.SMOOTH.get());
     }
 
     private record Column(int x, int y, int z, BlockState state) {
@@ -400,7 +394,7 @@ public final class BuilderServerHandler {
         clipboard.put("entries", entries);
         ClipboardStore.set(player, clipboard);
         sendMessage(player, "Copied " + count + " block(s) to clipboard.");
-        playSound(player, ModSounds.COPY);
+        playSound(player, ModSounds.COPY.get());
     }
 
     public static void paste(ServerPlayer player, BlockPos anchor) {
@@ -456,15 +450,15 @@ public final class BuilderServerHandler {
         } else {
             String skippedNote = skipped > 0 ? " (" + skipped + " skipped - not loaded)" : "";
             sendMessage(player, "Pasted " + count + " block(s)." + skippedNote);
-            playSound(player, ModSounds.PASTE);
+            playSound(player, ModSounds.PASTE.get());
         }
     }
 
     public static void undo(ServerPlayer player) {
         if (UndoStore.undo(player)) {
-            playSound(player, ModSounds.UNDO);
+            playSound(player, ModSounds.UNDO.get());
         } else {
-            playSound(player, ModSounds.ERROR);
+            playSound(player, ModSounds.ERROR.get());
         }
     }
 
@@ -475,12 +469,6 @@ public final class BuilderServerHandler {
     /** Tag put on every off-grid display so we can find and manage them. */
     public static final String OFF_GRID_TAG = "buildertools.offgrid";
 
-    /**
-     * Spawns a rotated block display at the cell instead of a grid block, so the block can sit at
-     * any angle (Hytale-style offset placement). The yaw is stored both in the display
-     * transformation (what renders) and in the entity's yaw (so the client can read it back for
-     * inheritance without needing the private transformation getter).
-     */
     /**
      * Places a NEW rotated block into the mod's block layer: the held vanilla block goes into the
      * layer (the block itself stays the block it is - same shading, breaking, drops), the vanilla
@@ -507,9 +495,9 @@ public final class BuilderServerHandler {
             Vec3 c = existing.center(cell);
             RotationStore.set(level, cell, new RotationData(existing.state(), yaw, pitch, billboard, c));
             recordOffGridPlacement(player, cell);
-            sendDebug(player, "Rotated block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
+            sendMessage(player, "Rotated block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
                     + (billboard ? ", billboard" : "") + ").");
-            playSound(player, ModSounds.SET_CORNER_1);
+            playSound(player, ModSounds.SET_CORNER_1.get());
             return;
         }
         // New placement: the held block into the cell, then record its rotation.
@@ -518,13 +506,8 @@ public final class BuilderServerHandler {
             sendError(player, "Hold a block in your main hand to place.");
             return;
         }
-        BlockState state = blockItem.getBlock().defaultBlockState();
-        if (state.getBlock() instanceof io.github.favasur.fullslabs.block.VerticalSlabBlock vertical) {
-            state = vertical.defaultBlockState();
-        } else if (state.getBlock() instanceof net.minecraft.world.level.block.SlabBlock slab
-                && io.github.favasur.fullslabs.block.VerticalSlabBlock.hasVertical(slab)) {
-            state = io.github.favasur.fullslabs.block.VerticalSlabBlock.getVertical(slab).defaultBlockState();
-        }
+        BlockState state = io.github.favasur.fullslabs.block.SlabVertical.vertical(
+                blockItem.getBlock().defaultBlockState());
         VoxelShape shape = state.getCollisionShape(level, BlockPos.ZERO);
         if (player.getBoundingBox().intersects(OffGridTransform.boxAround(cx, cy, cz, yaw, pitch, shape.bounds()))) {
             sendError(player, "You're in the way - move back first.");
@@ -549,9 +532,9 @@ public final class BuilderServerHandler {
         if (!player.getAbilities().instabuild) {
             held.shrink(1);
         }
-        sendDebug(player, "Placed block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
+        sendMessage(player, "Placed block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
                 + (billboard ? ", billboard" : "") + ").");
-        playSound(player, ModSounds.SET_CORNER_1);
+        playSound(player, ModSounds.SET_CORNER_1.get());
     }
 
     /**
@@ -601,8 +584,8 @@ public final class BuilderServerHandler {
         if (player.distanceToSqr(Vec3.atCenterOf(cell)) > MAX_DISTANCE * MAX_DISTANCE) {
             return;
         }
+        BlockState state = data.state();
         if (!player.getAbilities().instabuild) {
-            BlockState state = data.state();
             if (state != null && !state.isAir()) {
                 level.addFreshEntity(new ItemEntity(level,
                         cell.getX() + 0.5, cell.getY() + 0.5, cell.getZ() + 0.5,
@@ -610,7 +593,10 @@ public final class BuilderServerHandler {
             }
         }
         RotationStore.remove(level, cell);
-        playSound(player, ModSounds.SET_CORNER_2);
+        if (state != null && !state.isAir()) {
+            level.levelEvent(2001, cell, Block.getId(state));
+        }
+        playSound(player, ModSounds.SET_CORNER_2.get());
     }
 
     /**
@@ -629,8 +615,8 @@ public final class BuilderServerHandler {
             atSpot.discardWithDisplay();
             spawnLegacyPair(level, c.x, c.y, c.z, state, yaw, pitch, billboard);
             recordOffGridPlacement(player, BlockPos.containing(cx, cy, cz));
-            sendDebug(player, "Rotated legacy block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch) + ").");
-            playSound(player, ModSounds.SET_CORNER_1);
+            sendMessage(player, "Rotated legacy block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch) + ").");
+            playSound(player, ModSounds.SET_CORNER_1.get());
             return;
         }
         handleBlockRotation(player, BlockPos.containing(cx, cy, cz), cx, cy, cz, yaw, pitch, billboard);
@@ -649,7 +635,7 @@ public final class BuilderServerHandler {
         display.addTag(OFF_GRID_TAG);
         level.addFreshEntity(display);
 
-        OffGridBlockEntity block = ModEntities.OFF_GRID_BLOCK.create(level);
+        OffGridBlockEntity block = ModEntities.OFF_GRID_BLOCK.get().create(level);
         if (block != null) {
             block.setRepresentedState(state);
             block.setPlacementRotation(yaw, pitch);
@@ -703,7 +689,7 @@ public final class BuilderServerHandler {
         return false;
     }
 
-    /** Removes the off-grid display in the cell (dropping its item in survival) and plays a break sound. */
+    /** Removes the off-grid display at the given model center (dropping its item in survival) and plays a break sound. */
     public static void removeOffGrid(ServerPlayer player, double cx, double cy, double cz) {
         if (player.distanceToSqr(cx, cy, cz) > MAX_DISTANCE * MAX_DISTANCE) {
             sendError(player, "Position is too far away.");
@@ -714,8 +700,8 @@ public final class BuilderServerHandler {
         if (block == null) {
             return;
         }
+        BlockState state = block.getRepresentedState();
         if (!player.getAbilities().instabuild) {
-            BlockState state = block.getRepresentedState();
             if (!state.isAir()) {
                 level.addFreshEntity(new ItemEntity(level,
                         cx, cy + 0.25, cz,
@@ -723,7 +709,10 @@ public final class BuilderServerHandler {
             }
         }
         block.discardWithDisplay();
-        playSound(player, ModSounds.SET_CORNER_2);
+        if (!state.isAir()) {
+            level.levelEvent(2001, BlockPos.containing(cx, cy, cz), Block.getId(state));
+        }
+        playSound(player, ModSounds.SET_CORNER_2.get());
     }
 
     /** Finds the solid off-grid block whose model center is nearest the given point, or null. */
@@ -744,7 +733,7 @@ public final class BuilderServerHandler {
         return bestBlock;
     }
 
-    /** Finds the solid off-grid block occupying the given cell, or null. */
+    /** Finds the solid off-grid block occupying the given grid cell (center inside it), or null. */
     public static OffGridBlockEntity findOffGrid(Level level, BlockPos pos) {
         for (OffGridBlockEntity block : level.getEntitiesOfClass(OffGridBlockEntity.class,
                 new AABB(pos.getX() - 1, pos.getY() - 1, pos.getZ() - 1,
@@ -798,6 +787,13 @@ public final class BuilderServerHandler {
             return;
         }
         entity.teleportTo(x, y, z);
+        if (entity instanceof Painting painting && painting instanceof FlexiblePaintingAccess access && !headOnly) {
+            // Entity Tool yaw is an absolute world yaw. Flexible Painting stores only the extra
+            // rotation relative to the painting's vanilla wall/floor facing, so its attachment
+            // direction remains stable while the visible artwork follows the tool.
+            float vanillaFacing = painting.getDirection().get2DDataValue() * 90.0f;
+            access.flexiblePainting$setRotation(yaw - vanillaFacing, pitch);
+        }
         if (headOnly) {
             // Hytale Alt+R "rotate head": only the head yaw changes, the body stays put.
             entity.setYHeadRot(yaw);
@@ -834,7 +830,7 @@ public final class BuilderServerHandler {
         }
         level.addFreshEntity(entity);
         sendMessage(player, "Spawned " + EntityType.getKey(type).getPath() + ".");
-        playSound(player, ModSounds.ENTITY_DUPLICATE);
+        playSound(player, ModSounds.ENTITY_DUPLICATE.get());
     }
 
     public static void deleteEntity(ServerPlayer player, int entityId) {
@@ -844,7 +840,7 @@ public final class BuilderServerHandler {
         }
         entity.discard();
         sendMessage(player, "Removed entity.");
-        playSound(player, ModSounds.ENTITY_DELETE);
+        playSound(player, ModSounds.ENTITY_DELETE.get());
     }
 
     public static void duplicateEntity(ServerPlayer player, int entityId) {
@@ -874,7 +870,7 @@ public final class BuilderServerHandler {
         copy.moveTo(entity.getX() + 0.5, entity.getY(), entity.getZ() + 0.5, entity.getYRot(), entity.getXRot());
         level.addFreshEntity(copy);
         sendMessage(player, "Duplicated entity.");
-        playSound(player, ModSounds.ENTITY_DUPLICATE);
+        playSound(player, ModSounds.ENTITY_DUPLICATE.get());
     }
 
     /** All positions of a sphere of radius {@link #BRUSH_RADIUS} around the center (inclusive). */
@@ -979,26 +975,21 @@ public final class BuilderServerHandler {
     // Creative settings (world + player)
     // ------------------------------------------------------------------
 
-    /** Frozen day times per dimension while "Pause Time" is enabled. */
-    private static final Map<ResourceKey<Level>, Long> PAUSED_DAY_TIME = new HashMap<>();
-
     /** Players who have No Clip enabled. {@code Player.tick()} resets {@code noPhysics} every
      *  tick (it is derived from spectator mode), so each tick we re-apply it for these players. */
     private static final Set<UUID> NO_CLIP_PLAYERS = new HashSet<>();
 
-    public static void applyWorldSettings(ServerPlayer player, long timeOfDay, Boolean pauseTime, int weather) {
+    public static void applyWorldSettings(ServerPlayer player, long timeOfDay, Boolean pauseTime, int weather,
+                                          Boolean smoothTerrain) {
         ServerLevel level = player.serverLevel();
         if (timeOfDay >= 0) {
             level.setDayTime(timeOfDay);
-            // Keep the frozen time in sync when the slider moves while paused.
-            PAUSED_DAY_TIME.put(level.dimension(), timeOfDay);
         }
         if (pauseTime != null) {
-            if (pauseTime) {
-                PAUSED_DAY_TIME.putIfAbsent(level.dimension(), level.getDayTime());
-            } else {
-                PAUSED_DAY_TIME.remove(level.dimension());
-            }
+            // Pause Time = stop the day/night cycle the vanilla way, so everything else keeps
+            // running (mobs, redstone) while the sun freezes in place.
+            level.getGameRules().getRule(GameRules.RULE_DAYLIGHT)
+                    .set(!pauseTime, level.getServer());
         }
         if (weather != net.buildertools.network.packet.WorldSettingsPacket.SKIP_WEATHER) {
             switch (weather) {
@@ -1009,20 +1000,17 @@ public final class BuilderServerHandler {
                 }
             }
         }
-        sendMessage(player, "Updated world settings.");
-    }
-
-    /** Holds the day/night cycle still for every paused dimension (called every server tick). */
-    public static void tickPausedLevels(MinecraftServer server) {
-        if (PAUSED_DAY_TIME.isEmpty()) {
-            return;
-        }
-        for (ServerLevel level : server.getAllLevels()) {
-            Long frozen = PAUSED_DAY_TIME.get(level.dimension());
-            if (frozen != null) {
-                level.setDayTime(frozen);
+        if (smoothTerrain != null) {
+            // Smooth Terrain world setting: applies the bundled Surface Nets meshing on every
+            // client (and the integrated/local server) and re-meshes the chunks.
+            io.github.favasur.smoothterrain.config.SmoothTerrainConfigImpl.Server.setEnabled(smoothTerrain);
+            net.buildertools.network.packet.SmoothTerrainTogglePacket packet =
+                    new net.buildertools.network.packet.SmoothTerrainTogglePacket(smoothTerrain);
+            for (ServerPlayer p : level.players()) {
+                net.buildertools.network.FabricNetwork.sendToPlayer(p, packet);
             }
         }
+        sendMessage(player, "Updated world settings.");
     }
 
     public static void applyPlayerAbilities(ServerPlayer player, float flySpeed, Boolean noClip, Boolean fly) {
@@ -1070,7 +1058,7 @@ public final class BuilderServerHandler {
         }
         entity.setDeltaMovement(Vec3.ZERO);
         sendMessage(player, freeze ? "Froze entity." : "Unfroze entity.");
-        playSound(player, ModSounds.ENTITY_MOVE);
+        playSound(player, ModSounds.ENTITY_MOVE.get());
     }
 
     /** Validates that an entity exists, is not a player and is close enough. Returns null on failure. */

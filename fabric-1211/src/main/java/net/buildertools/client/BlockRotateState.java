@@ -7,6 +7,8 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 import org.lwjgl.glfw.GLFW;
 
 /**
@@ -17,6 +19,7 @@ import org.lwjgl.glfw.GLFW;
  * the current rotation. Aiming at an already-placed off-grid block and pressing R re-enters the
  * editor for that block so it can be re-rotated in place.
  */
+@OnlyIn(Dist.CLIENT)
 public final class BlockRotateState {
     private static boolean active;
     private static BlockPos target;
@@ -84,9 +87,9 @@ public final class BlockRotateState {
         target = placementCell(player);
         yaw = 0.0f;
         pitch = 0.0f;
+        billboard = false;
         fixedTarget = false;
         fixedCenter = null;
-        billboard = false;
         previewState = null;
         captureAngles(player);
         active = true;

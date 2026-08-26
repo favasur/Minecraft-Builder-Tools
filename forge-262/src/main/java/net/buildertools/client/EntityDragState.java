@@ -87,6 +87,5 @@ public final class EntityDragState {
         lastSent = next;
         ClientPackets.sendToServer(new EntityTransformPacket(
                 entity.getId(), x, y, z, entity.getYRot(), entity.getXRot(), false));
-
     }
 }

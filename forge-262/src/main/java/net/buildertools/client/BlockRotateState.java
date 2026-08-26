@@ -87,9 +87,9 @@ public final class BlockRotateState {
         target = placementCell(player);
         yaw = 0.0f;
         pitch = 0.0f;
+        billboard = false;
         fixedTarget = false;
         fixedCenter = null;
-        billboard = false;
         previewState = null;
         captureAngles(player);
         active = true;

@@ -1,14 +1,16 @@
 package net.buildertools.client;
 
-import net.buildertools.network.ModPackets;
+import net.minecraft.client.Minecraft;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
-import net.minecraftforge.network.PacketDistributor;
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 
+@OnlyIn(Dist.CLIENT)
 public final class ClientPackets {
     private ClientPackets() {
     }
 
     public static void sendToServer(CustomPacketPayload payload) {
-        ModPackets.CHANNEL.send(payload, PacketDistributor.SERVER.noArg());
+        net.buildertools.network.ModPackets.sendToServer(payload);
     }
 }

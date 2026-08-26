@@ -3,12 +3,15 @@ package net.buildertools.client.settings;
 import net.buildertools.common.NoClipState;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.Options;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 
 /**
  * Client-side mirror of the Creative settings. World/player values (time, weather, flight
  * speed, no clip) are sent to the server when changed; purely visual values (fullbright, selection
  * opacity) and the Entity Tool options (surface lock, grid snap, grid size) live on the client.
  */
+@OnlyIn(Dist.CLIENT)
 public final class BuilderSettings {
     // Entity Tool
     private static boolean surfaceLock;

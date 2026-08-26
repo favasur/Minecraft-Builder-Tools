@@ -9,8 +9,6 @@ import com.mojang.brigadier.context.CommandContext;
 import net.buildertools.entity.OffGridBlockEntity;
 import net.buildertools.network.packet.SelectionSyncPacket;
 import net.buildertools.registry.ModItems;
-import net.minecraft.world.entity.Display;
-import net.minecraft.world.entity.Entity;
 import net.minecraft.commands.CommandBuildContext;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
@@ -19,6 +17,8 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.Display;
+import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
@@ -39,7 +39,8 @@ import java.util.function.BiPredicate;
  * Tool. The selection is kept server-side (synced by the client) so all of these work in single
  * player and on servers:
  * {@code set, replace, walls, outline, hollow, faces, overlay, center, copy, cut, paste, move,
- * stack, expand, contract, shift, undo, redo, clear, clearinventory, clearentities, pos1, pos2, sel, wand}.
+ * stack, expand, contract, shift, undo, redo, clear, clearinventory, clearentities, pos1, pos2,
+ * sel, wand}.
  */
 public final class BuilderCommand {
     private static final int MAX_BLOCKS = BuilderServerHandler.MAX_BLOCKS;
@@ -336,7 +337,20 @@ public final class BuilderCommand {
                 block.discardWithDisplay();
             }
         }
-        message(player, "Cleared " + count + " block(s) from the selection.");
+        // Rotated blocks of the mod's layer in the selection are wiped too.
+        int freeCount = 0;
+        if (level instanceof net.minecraft.server.level.ServerLevel serverLevel) {
+            for (net.minecraft.core.BlockPos pos : net.minecraft.core.BlockPos.betweenClosed(
+                    r.min().getX(), r.min().getY(), r.min().getZ(),
+                    r.max().getX(), r.max().getY(), r.max().getZ())) {
+                if (RotationStore.hasRotation(serverLevel, pos)) {
+                    RotationStore.remove(serverLevel, pos.immutable());
+                    freeCount++;
+                }
+            }
+        }
+        message(player, "Cleared " + count + " block(s) from the selection"
+                + (freeCount > 0 ? " + " + freeCount + " rotated block(s)" : "") + ".");
         return 1;
     }
 

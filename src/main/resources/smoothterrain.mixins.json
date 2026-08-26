@@ -21,7 +21,8 @@
 		"client.NonSodiumLevelRendererMixin",
 		"client.RenderChunkRebuildTaskMixin",
 		"client.RenderChunkRegionMixin",
-		"client.ScreenEffectRendererMixin"
+		"client.ScreenEffectRendererMixin",
+		"client.VideoSettingsScreenMixin"
 	],
 	"server": [
 	]

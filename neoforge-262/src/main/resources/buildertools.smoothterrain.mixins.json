@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "io.github.favasur.smoothterrain.compat",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "VideoSettingsScreenMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -4,6 +4,8 @@ import net.buildertools.selection.SelectionManager;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 
 /**
  * Client-side state while the player is dragging one of the selection face handles.
@@ -16,6 +18,7 @@ import net.minecraft.world.phys.Vec3;
  * live min/max pair (matching the {@code BuilderToolSelectionUpdate} packet, which sends the
  * box as xMin/yMin/zMin/xMax/yMax/zMax).
  */
+@OnlyIn(Dist.CLIENT)
 public final class HandleDragState {
     private static Direction.Axis axis;
     private static boolean positive;

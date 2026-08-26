@@ -6,18 +6,20 @@ import net.buildertools.selection.SelectionManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.CharacterEvent;
+import net.minecraft.client.input.KeyEvent;
 import net.minecraft.client.input.MouseButtonEvent;
-import net.minecraft.core.Registry;
-import net.minecraft.core.registries.Registries;
+import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.EntityTypes;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
+
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -30,6 +32,7 @@ import java.util.function.Consumer;
  * searchable list of entities to spawn in front of the player, plus live yaw/pitch sliders that
  * rotate the currently selected entity (including off-grid blocks) in place.
  */
+@OnlyIn(Dist.CLIENT)
 public final class EntityToolScreen extends Screen {
     private static final int PANEL_W = 280;
     private static final int LIST_TOP = 64;
@@ -58,10 +61,8 @@ public final class EntityToolScreen extends Screen {
     @Override
     protected void init() {
         allTypes.clear();
-        Registry<EntityType<?>> registry =
-                Minecraft.getInstance().level.registryAccess().lookupOrThrow(Registries.ENTITY_TYPE);
-        for (Map.Entry<ResourceKey<EntityType<?>>, EntityType<?>> entry : registry.entrySet()) {
-            if (entry.getValue() != EntityTypes.PLAYER) {
+        for (Map.Entry<ResourceKey<EntityType<?>>, EntityType<?>> entry : BuiltInRegistries.ENTITY_TYPE.entrySet()) {
+            if (entry.getValue() != net.minecraft.world.entity.EntityTypes.PLAYER) {
                 allTypes.add(entry.getValue());
             }
         }
@@ -79,7 +80,7 @@ public final class EntityToolScreen extends Screen {
             applyFilter();
             scrollOffset = 0;
         });
-        this.addRenderableWidget(search);
+        this.addWidget(search);
 
         controls.clear();
         int x = panelX + 10;
@@ -111,12 +112,12 @@ public final class EntityToolScreen extends Screen {
     }
 
     // ------------------------------------------------------------------
-    // Rendering (26.2: extractRenderState + GuiGraphicsExtractor)
+    // Rendering
     // ------------------------------------------------------------------
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float partialTick) {
-        super.extractRenderState(graphics, mouseX, mouseY, partialTick);
+        extractBackground(graphics, mouseX, mouseY, partialTick);
         graphics.fill(panelX - 4, panelY - 4, panelX + PANEL_W + 4, panelY + panelH + 4, 0xEE070C16);
         graphics.fill(panelX, panelY, panelX + PANEL_W, panelY + panelH, 0xF0122038);
         graphics.fill(panelX, panelY, panelX + PANEL_W, panelY + 2, 0xFF3A5A8C);
@@ -125,6 +126,8 @@ public final class EntityToolScreen extends Screen {
         graphics.fill(panelX + PANEL_W - 2, panelY, panelX + PANEL_W, panelY + panelH, 0xFF3A5A8C);
         graphics.text(this.font, "Entity Tool", panelX + 10, panelY + 8, 0xFFFFFFFF);
         graphics.fill(panelX + 8, panelY + 24, panelX + PANEL_W - 8, panelY + 25, 0xFF2A3F66);
+
+        search.extractRenderState(graphics, mouseX, mouseY, partialTick);
 
         // Scrollable entity list.
         int y = panelY + LIST_TOP;
@@ -150,8 +153,13 @@ public final class EntityToolScreen extends Screen {
                 ? Component.translatable(selected.getType().getDescriptionId()).getString()
                 : "(nothing selected)";
         graphics.text(this.font, "Selected: " + info, panelX + 10, listBottom + 2, 0xFF7FA8E0);
-        yawSlider.setEnabled(selected != null && !selected.isRemoved());
-        pitchSlider.setEnabled(selected != null && !selected.isRemoved());
+        if (selected == null || selected.isRemoved()) {
+            yawSlider.setEnabled(false);
+            pitchSlider.setEnabled(false);
+        } else {
+            yawSlider.setEnabled(true);
+            pitchSlider.setEnabled(true);
+        }
         for (Control control : controls) {
             control.render(graphics, mouseX, mouseY);
         }
@@ -169,15 +177,16 @@ public final class EntityToolScreen extends Screen {
     }
 
     // ------------------------------------------------------------------
-    // Input (26.2: MouseButtonEvent)
+    // Input
     // ------------------------------------------------------------------
 
     @Override
-    public boolean mouseClicked(MouseButtonEvent event, boolean inside) {
+    public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         double mouseX = event.x();
         double mouseY = event.y();
+        int button = event.button();
         if (mouseX >= panelX + 2 && mouseX <= panelX + PANEL_W - 2
-                && mouseY >= panelY + LIST_TOP && mouseY <= listBottom && event.button() == 0) {
+                && mouseY >= panelY + LIST_TOP && mouseY <= listBottom && button == 0) {
             int row = (int) ((mouseY - (panelY + LIST_TOP)) / 12) + scrollOffset;
             if (row >= 0 && row < filtered.size()) {
                 spawn(filtered.get(row));
@@ -185,25 +194,31 @@ public final class EntityToolScreen extends Screen {
             }
         }
         for (Control control : controls) {
-            if (control.mouseClicked(mouseX, mouseY, event.button())) {
+            if (control.mouseClicked(mouseX, mouseY, button)) {
                 return true;
             }
         }
-        return super.mouseClicked(event, inside);
+        return super.mouseClicked(event, doubleClick);
     }
 
     @Override
     public boolean mouseDragged(MouseButtonEvent event, double dragX, double dragY) {
+        double mouseX = event.x();
+        double mouseY = event.y();
+        int button = event.button();
         for (Control control : controls) {
-            control.mouseDragged(event.x(), event.y(), event.button(), dragX, dragY);
+            control.mouseDragged(mouseX, mouseY, button, dragX, dragY);
         }
         return super.mouseDragged(event, dragX, dragY);
     }
 
     @Override
     public boolean mouseReleased(MouseButtonEvent event) {
+        double mouseX = event.x();
+        double mouseY = event.y();
+        int button = event.button();
         for (Control control : controls) {
-            control.mouseReleased(event.x(), event.y(), event.button());
+            control.mouseReleased(mouseX, mouseY, button);
         }
         return super.mouseReleased(event);
     }
@@ -216,6 +231,22 @@ public final class EntityToolScreen extends Screen {
             return true;
         }
         return super.mouseScrolled(mouseX, mouseY, deltaX, deltaY);
+    }
+
+    @Override
+    public boolean keyPressed(KeyEvent event) {
+        if (search.isFocused() && event.key() != org.lwjgl.glfw.GLFW.GLFW_KEY_ESCAPE) {
+            return search.keyPressed(event);
+        }
+        return super.keyPressed(event);
+    }
+
+    @Override
+    public boolean charTyped(CharacterEvent event) {
+        if (search.isFocused()) {
+            return search.charTyped(event);
+        }
+        return super.charTyped(event);
     }
 
     // ------------------------------------------------------------------
@@ -232,7 +263,7 @@ public final class EntityToolScreen extends Screen {
         // Spawn at the center of the block the player is looking at.
         ClientPackets.sendToServer(new EntitySpawnPacket(EntityType.getKey(type),
                 Math.floor(pos.x) + 0.5, Math.floor(pos.y), Math.floor(pos.z) + 0.5));
-        p.playSound(net.buildertools.registry.ModSounds.SET_CORNER_1, 1.0f, 1.0f);
+        p.playSound(net.buildertools.registry.ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
     }
 
     private float currentYaw() {

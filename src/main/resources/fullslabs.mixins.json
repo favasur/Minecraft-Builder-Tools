@@ -5,21 +5,14 @@
     "minVersion": "0.8",
     "plugin": "io.github.favasur.fullslabs.mixin.FullSlabsMixinPlugin",
     "client": [
-        "client.BlockRenderDispatcherMixin",
-        "client.LevelRendererMixin",
-        "client.MultiPlayerGameModeMixin"
+        "client.BlockModelShaperMixin",
+        "client.GameRendererMixin"
     ],
     "mixins": [
-        "BlockEntityTypeAccessor",
-        "BlockItemMixin",
-        "EntityMixin",
-        "HoneycombItemMixin",
-        "LevelChunkMixin",
-        "LivingEntityMixin",
+        "BlockSupportShapeMixin",
         "ServerPlayerGameModeMixin",
         "SlabBlockMixin",
-        "TagLoaderMixin",
-        "WeatheringCopperMixin"
+        "SlabLightMixin"
     ],
     "injectors": {
         "defaultRequire": 1

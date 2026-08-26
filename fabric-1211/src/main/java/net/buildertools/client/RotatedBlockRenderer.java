@@ -3,24 +3,18 @@ package net.buildertools.client;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.buildertools.server.RotationStore;
-import net.buildertools.util.FreeBlockRaycast;
 import net.buildertools.util.OffGridTransform;
 import net.buildertools.util.RotationData;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
-import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
-import net.minecraft.client.renderer.RenderType;
-import net.minecraft.client.resources.model.BakedModel;
 import net.minecraft.core.BlockPos;
-import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.RenderShape;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import org.joml.Quaternionf;
-
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.neoforge.client.event.RenderLevelStageEvent;
 import java.util.Map;
 
 /**
@@ -33,40 +27,29 @@ import java.util.Map;
  * neighbors - the block keeps its textures while blending with the surrounding blocks from any
  * viewing angle. The cell itself stays air - this renderer IS the block's visual.
  *
- * <p>Rendered at the {@code WorldRenderEvents.AFTER_TRANSLUCENT} stage (same pass the off-grid
- * placement preview uses), so the placed block looks exactly like the preview that placed it. A
- * dark-blue rotated outline shows the block under the cursor.
+ * <p>Rendered at the {@link RenderLevelStageEvent.Stage#AFTER_BLOCK_ENTITIES} stage, so the placed block
+ * looks exactly like the placement preview (which renders the same way).
  */
+@OnlyIn(Dist.CLIENT)
 public final class RotatedBlockRenderer {
-    private static final int OUTLINE_COLOR = 0xFF3A6BFF; // bright blue, Hytale-ish selection accent
     private static final int MAX_RENDER_DIST = 96;
 
     private RotatedBlockRenderer() {
     }
 
-    public static void register() {
-        // AFTER_TRANSLUCENT runs after the world has been drawn; its matrix stack carries the
-        // camera view, so world coordinates drawn through it land in the right place.
-        WorldRenderEvents.AFTER_TRANSLUCENT.register(RotatedBlockRenderer::onRenderLevel);
-    }
-
-    private static void onRenderLevel(WorldRenderContext context) {
+    @SubscribeEvent
+    public static void onRenderLevel(RenderLevelStageEvent event) {
+        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_BLOCK_ENTITIES) {
+            return;
+        }
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null || minecraft.player == null) {
             return;
         }
-        var poseStack = context.matrixStack();
-        MultiBufferSource buffers = context.consumers();
-        Vec3 camera = context.camera().getPosition();
+        PoseStack poseStack = worldPoseStack(event);
+        MultiBufferSource.BufferSource buffers = minecraft.renderBuffers().bufferSource();
+        Vec3 camera = event.getCamera().getPosition();
         double range = MAX_RENDER_DIST * MAX_RENDER_DIST;
-
-        Player player = minecraft.player;
-
-        // Aimed rotated block (the rotated outline to show).
-        Vec3 eye = player.getEyePosition(1.0f);
-        Vec3 look = player.getLookAngle();
-        FreeBlockRaycast.Hit aimed = FreeBlockRaycast.raycast(minecraft.level, eye,
-                eye.add(look.scale(6.0)));
 
         for (Map.Entry<BlockPos, RotationData> e : RotationStore.clientEntries()) {
             BlockPos pos = e.getKey();
@@ -80,20 +63,16 @@ public final class RotatedBlockRenderer {
                 continue;
             }
             // Billboard blocks always face the player (Hytale), like the placement preview.
-            Quaternionf quat;
-            BakedModel rotatedModel;
+            RotatedBlockModel rotatedModel;
+            float renderYaw = rot.yaw();
+            float renderPitch = rot.pitch();
             if (rot.billboard()) {
-                double dx = center.x - camera.x;
-                double dy = center.y - camera.y;
-                double dz = center.z - camera.z;
-                double h = Math.sqrt(dx * dx + dz * dz);
-                float yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
-                float pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.max(h, 1.0E-4)));
-                quat = OffGridTransform.rotation(yaw, pitch);
-                rotatedModel = RotatedBlockModel.build(state, quat);
+                float[] facing = OffGridTransform.billboardAngles(center, camera);
+                renderYaw = facing[0];
+                renderPitch = facing[1];
+                rotatedModel = RotatedBlockModel.build(state, OffGridTransform.rotation(renderYaw, renderPitch));
             } else {
-                quat = OffGridTransform.rotation(rot.yaw(), rot.pitch());
-                rotatedModel = RotatedBlockModel.get(state, rot.yaw(), rot.pitch());
+                rotatedModel = RotatedBlockModel.get(state, renderYaw, renderPitch);
             }
 
             poseStack.pushPose();
@@ -107,35 +86,30 @@ public final class RotatedBlockRenderer {
             // axis-quantized pipeline, so the rotated block blends with its surroundings from any
             // viewing angle instead of reading darker than the blocks around it.
             if (rotatedModel != null) {
+                if (!rot.billboard()) {
+                    RotatedBlockTriangles.triangles(rot, pos, minecraft.level, renderYaw, renderPitch);
+                }
                 VertexConsumer consumer = buffers.getBuffer(
                         net.minecraft.client.renderer.ItemBlockRenderTypes.getRenderType(state, false));
                 RotatedBlockRendering.render(rotatedModel, state, pos, center, poseStack, consumer,
                         minecraft.level);
             }
             poseStack.popPose();
-
-            // Rotated outline for the block under the cursor.
-            if (aimed != null && aimed.cell().equals(pos)) {
-                drawRotatedOutline(poseStack, buffers, center, quat, state);
-            }
         }
+        buffers.endBatch();
     }
 
-    /** Draws the 12 edges of the block's own shape bounds rotated around the cell center. */
-    private static void drawRotatedOutline(PoseStack poseStack, MultiBufferSource buffers,
-                                           Vec3 center, Quaternionf quat, BlockState state) {
-        AABB shape = state.getCollisionShape(Minecraft.getInstance().level, BlockPos.ZERO).bounds();
-        poseStack.pushPose();
-        poseStack.translate(center.x, center.y, center.z);
-        poseStack.mulPose(quat);
-        poseStack.translate(-0.5f, -0.5f, -0.5f);
-        VertexConsumer lines = buffers.getBuffer(RenderType.lines());
-        float r = ((OUTLINE_COLOR >> 16) & 0xFF) / 255.0f;
-        float g = ((OUTLINE_COLOR >> 8) & 0xFF) / 255.0f;
-        float b = (OUTLINE_COLOR & 0xFF) / 255.0f;
-        float a = ((OUTLINE_COLOR >> 24) & 0xFF) / 255.0f;
-        LevelRenderer.renderLineBox(poseStack, lines, shape.minX, shape.minY, shape.minZ,
-                shape.maxX, shape.maxY, shape.maxZ, r, g, b, a);
-        poseStack.popPose();
+    /**
+     * Builds the same camera-relative pose used by LevelRenderer's block/entity passes. The stage
+     * event is dispatched while the renderer's model-view matrix is already the camera frustum;
+     * putting that matrix into the pose as well would transform every vertex twice and make the
+     * result move with the camera. The shader supplies the frustum, so this pose only subtracts
+     * the camera position.
+     */
+    private static PoseStack worldPoseStack(RenderLevelStageEvent event) {
+        Vec3 cameraPos = event.getCamera().getPosition();
+        PoseStack poseStack = new PoseStack();
+        poseStack.translate(-cameraPos.x, -cameraPos.y, -cameraPos.z);
+        return poseStack;
     }
 }

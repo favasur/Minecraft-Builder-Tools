@@ -7,8 +7,8 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-
-
+import net.minecraftforge.api.distmarker.Dist;
+import net.minecraftforge.api.distmarker.OnlyIn;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import org.lwjgl.glfw.GLFW;
@@ -21,6 +21,7 @@ import org.lwjgl.glfw.GLFW;
  * fills, {@link #tick} returns true and the caller sends the removal packet (the server drops the
  * block's item in survival).
  */
+@OnlyIn(Dist.CLIENT)
 public final class OffGridMining {
     private static OffGridBlockEntity target;
     private static float progress;

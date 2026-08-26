@@ -1,10 +1,16 @@
 package net.buildertools.mixin;
 
+import io.github.favasur.smoothterrain.config.SmoothTerrainConfig;
+import io.github.favasur.smoothterrain.mesh.MeshCache;
+import io.github.favasur.smoothterrain.mesh.MeshCollisionShape;
+import io.github.favasur.smoothterrain.collision.MeshCollisionScope;
+import net.buildertools.collision.RotatedCollisionProvider;
 import net.buildertools.entity.OffGridBlockEntity;
 import net.buildertools.server.RotationStore;
-import net.buildertools.util.OffGridTransform;
 import net.buildertools.util.RotationData;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.SectionPos;
+import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.level.CollisionGetter;
 import net.minecraft.world.level.Level;
@@ -21,17 +27,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-/**
- * The physical core of rotated blocks: every block-collision query also collects the mod's rotated
- * blocks that intersect the queried box, as the block's OWN shape rotated around its cell center
- * (voxelized). Minecraft's movement code then slides against the rotated faces exactly like it
- * slides against normal blocks - the collision matches the rotated render.
- *
- * <p>Legacy entity blocks (air-placed, possibly fractional model centers) get the same treatment:
- * their own entity collision is disabled (an entity can only be a single axis-aligned box, which
- * would leave invisible corners around a rotated cube), and the rotated voxel shape is added here
- * instead, so the hitbox matches the visual there too.
- */
+/** Adds rendered smooth-terrain meshes and rotated-layer geometry to entity movement queries. */
 @Mixin(CollisionGetter.class)
 public interface CollisionGetterMixin {
     @Inject(method = "getBlockCollisions(Lnet/minecraft/world/entity/Entity;Lnet/minecraft/world/phys/AABB;)Ljava/lang/Iterable;",
@@ -45,42 +41,98 @@ public interface CollisionGetterMixin {
         for (VoxelShape shape : cir.getReturnValue()) {
             shapes.add(shape);
         }
-        // The mod's block layer (rotated blocks, keyed by cell, rotated around their exact model
-        // center - fractional for blocks snapped onto a rotated neighbor's grid).
+        // Triangle-backed shapes implement Minecraft's axis sweep, but they are valid only for
+        // entity movement. Block-collision consumers such as placement, suffocation and
+        // pathfinding expect ordinary world-space VoxelShapes and may call bounds/toAabbs;
+        // returning a mesh there can freeze the camera or corrupt those queries. The movement
+        // mixin marks only Entity#collide with this scope.
+        boolean movementCollision = MeshCollisionScope.isEntityMovement();
+        boolean meshMode = SmoothTerrainConfig.Server.collisionsEnabled && movementCollision;
+
+        // --- Smooth terrain: exact triangle collision replaces the per-block approximations.
+        // BlockStateBaseMixin returns an empty shape for smoothable cells while this scope is
+        // active, so no coarse cell shape needs to be guessed or removed from this list.
+        if (meshMode) {
+            var mesher = SmoothTerrainConfig.Server.mesher;
+            int minCX = Mth.floor(box.minX - 2) >> 4;
+            int maxCX = Mth.floor(box.maxX + 2) >> 4;
+            int minCY = Mth.floor(box.minY - 2) >> 4;
+            int maxCY = Mth.floor(box.maxY + 2) >> 4;
+            int minCZ = Mth.floor(box.minZ - 2) >> 4;
+            int maxCZ = Mth.floor(box.maxZ + 2) >> 4;
+            for (int cx = minCX; cx <= maxCX; cx++) {
+                for (int cy = minCY; cy <= maxCY; cy++) {
+                    for (int cz = minCZ; cz <= maxCZ; cz++) {
+                        MeshCollisionShape sectionShape = MeshCache.getCollisionShape(level,
+                                SectionPos.of(cx, cy, cz).origin(), mesher);
+                        if (!sectionShape.isEmpty() && sectionShape.bounds().intersects(box)) {
+                            // getBlockCollisions is allowed to return only shapes that may touch
+                            // the query box. Without this check every generated section in the
+                            // broadphase would make noCollision() fail merely because the mesh is
+                            // non-empty, even when it is several blocks away.
+                            shapes.add(sectionShape);
+                        }
+                    }
+                }
+            }
+        }
+
+        // The exact triangle shape is valid only inside Entity#collide. Do not expose a
+        // voxelized approximation to other callers: its axis-aligned cells are the invisible
+        // XYZ-grid hitbox this layer is designed to eliminate.
+        if (!movementCollision) {
+            cir.setReturnValue(shapes);
+            return;
+        }
+
+        // --- The mod's block layer (rotated blocks, keyed by cell, rotated around their exact
+        // model center - fractional for blocks snapped onto a rotated neighbor's grid). Each
+        // rotated block's cell is air, so only the shape injected here represents it.
         for (Map.Entry<BlockPos, RotationData> e : RotationStore.getInBox(level, box)) {
             BlockPos pos = e.getKey();
             RotationData rot = e.getValue();
-            // Prefer the block's RENDERED model as the voxelization base (stair notches, thin
-            // fence posts), falling back to the collision shape when no model is available.
-            VoxelShape base = OffGridTransform.modelShape(rot.state());
-            if (base == null) {
-                base = rot.state().getCollisionShape(level, pos);
-            }
-            if (base.isEmpty()) {
-                continue;
-            }
             Vec3 c = rot.center(pos);
-            shapes.add(OffGridTransform.rotatedShape(rot.state(), base, rot.yaw(), rot.pitch(),
-                    c.x, c.y, c.z));
+            List<MeshCollisionShape.Tri> tris = RotatedCollisionProvider.triangles(rot, pos, level);
+            MeshCollisionShape exact = tris != null
+                    ? new MeshCollisionShape(tris)
+                    : null;
+            if (exact == null) {
+                VoxelShape fallbackBase = rot.state().getCollisionShape(level, pos);
+                if (!fallbackBase.isEmpty()) {
+                    exact = MeshCollisionShape.fromVoxelShape(fallbackBase, c.x, c.y, c.z,
+                            rot.yaw(), rot.pitch());
+                }
+            }
+            if (exact != null && !exact.isEmpty() && exact.bounds().intersects(box)) {
+                shapes.add(exact);
+            }
         }
-        // Legacy entity blocks (air-placed, fractional centers): collide via the rotated voxel
-        // shape around their own model center, never via their axis-aligned bounding box.
+        // Legacy Air Placement entities use the same movement-only geometry bridge.
         for (OffGridBlockEntity e : level.getEntitiesOfClass(OffGridBlockEntity.class, box.inflate(1.5))) {
             if (!e.isSolidCollidable()) {
                 continue;
             }
             BlockState state = e.getRepresentedState();
-            VoxelShape base = OffGridTransform.modelShape(state);
-            if (base == null) {
-                base = state.getCollisionShape(level, BlockPos.ZERO);
-            }
-            if (base.isEmpty()) {
-                continue;
-            }
             net.minecraft.world.phys.Vec3 c = e.modelCenter();
-            shapes.add(OffGridTransform.rotatedShape(state, base,
-                    e.getPlacementYaw(), e.getPlacementPitch(), c.x, c.y, c.z));
+            RotationData legacyRotation = new RotationData(state, e.getPlacementYaw(),
+                    e.getPlacementPitch(), e.isBillboard(), c);
+            List<MeshCollisionShape.Tri> tris = RotatedCollisionProvider.triangles(legacyRotation,
+                    e.blockPosition(), level);
+            MeshCollisionShape exact = tris != null
+                    ? new MeshCollisionShape(tris)
+                    : null;
+            if (exact == null) {
+                VoxelShape fallbackBase = state.getCollisionShape(level, BlockPos.ZERO);
+                if (!fallbackBase.isEmpty()) {
+                    exact = MeshCollisionShape.fromVoxelShape(fallbackBase, c.x, c.y, c.z,
+                            e.getPlacementYaw(), e.getPlacementPitch());
+                }
+            }
+            if (exact != null && !exact.isEmpty() && exact.bounds().intersects(box)) {
+                shapes.add(exact);
+            }
         }
         cir.setReturnValue(shapes);
     }
+
 }

@@ -128,6 +128,7 @@ public final class SmoothTerrainConfigImpl {
 			SmoothTerrainConfig.Server.forceVisuals = INSTANCE.forceVisuals.get();
 			if (SmoothTerrainConfig.Server.forceVisuals) SmoothTerrainConfig.Client.render = true;
 			SmoothTerrainConfig.Server.extendFluidsRange = INSTANCE.extendFluidsRange.get();
+			SmoothTerrainConfig.Server.oldSmoothTerrainRoughness = 1F - INSTANCE.terrainSmoothness.get().floatValue();
 			// old terrain settings apply automatically
 			if (FMLEnvironment.dist.isClient()) reloadAllChunks("server config changed");
 			if (FMLEnvironment.dist.isDedicatedServer() && ServerLifecycleHooks.getCurrentServer() != null)
@@ -161,12 +162,24 @@ public final class SmoothTerrainConfigImpl {
 			}
 			saveAndLoad();
 		}
+
+		/**
+		 * Runtime smoothness (extent of smoothness) update from the Video Settings slider: 1 is
+		 * perfectly smooth, 0 is maximally rough. Persists the spec value and applies it to the
+		 * in-memory setting the meshers read (stored inverted as roughness); the actual chunk
+		 * re-mesh happens in refreshRendering.
+		 */
+		public static void setSmoothness(float smoothness) {
+			float clamped = Math.max(0F, Math.min(1F, smoothness));
+			INSTANCE.terrainSmoothness.set((double) clamped);
+			SmoothTerrainConfig.Server.oldSmoothTerrainRoughness = 1F - clamped;
+		}
 		static void saveAndLoad() { Hacks.saveAndLoad(ModConfig.Type.SERVER); }
 		static class Impl {
 			final ConfigValue<List<? extends String>> smoothableWhitelist, smoothableBlacklist;
 			final BooleanValue useDefaultSmoothableList, collisionsEnabled, tempMobCollisionsDisabled, onlyOldStyleCollisions, forceVisuals, oldNoCubesSlopes, oldNoCubesInFluids;
 			final IntValue oldStyleCollisionsEnhancementLevel, extendFluidsRange;
-			final DoubleValue oldNoCubesRoughness;
+			final DoubleValue terrainSmoothness;
 			final EnumValue<MesherType> mesher;
 			private Impl(Builder b) {
 				smoothableWhitelist = b.defineListAllowEmpty(Collections.singletonList("smoothableWhitelist"), Lists::newArrayList, String.class::isInstance);
@@ -181,9 +194,14 @@ public final class SmoothTerrainConfigImpl {
 				extendFluidsRange = b.defineInRange("extendFluidsRange", 1, 0, 2);
 				oldNoCubesSlopes = b.define("oldNoCubesSlopes", true);
 				oldNoCubesInFluids = b.define("oldNoCubesInFluids", true);
-				oldNoCubesRoughness = b.defineInRange("oldNoCubesRoughness", 0.5F, 0F, 1F);
+				terrainSmoothness = b.defineInRange("TerrainSmoothness", 0.5F, 0F, 1F);
 			}
 		}
+	}
+
+	/** Re-renders every chunk so a runtime setting change (Video Settings) is visible immediately. */
+	public static void refreshRendering() {
+		reloadAllChunks("smooth terrain rendering refreshed");
 	}
 
 	public static class Hacks {

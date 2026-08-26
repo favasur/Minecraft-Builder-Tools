@@ -1,61 +1,54 @@
 package net.buildertools.server;
 
+import net.buildertools.util.OffGridTransform;
+import net.buildertools.flexiblepainting.api.FlexiblePaintingAccess;
+import net.buildertools.util.RotationData;
+import net.buildertools.entity.OffGridBlockEntity;
+import net.buildertools.mixin.BlockDisplayAccessor;
+import net.buildertools.registry.ModEntities;
+import net.buildertools.mixin.DisplayAccessor;
 import net.buildertools.network.packet.SelectionSyncPacket;
 import net.buildertools.registry.ModSounds;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import net.minecraft.commands.arguments.blocks.BlockStateParser;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.Registry;
 import net.minecraft.core.Holder;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
+import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
-import net.minecraft.util.ProblemReporter;
-import net.minecraft.world.entity.Entity;
-import net.minecraft.world.entity.EntityProcessor;
-import net.minecraft.world.entity.EntitySpawnReason;
-import net.minecraft.world.entity.EntitySpawnRequest;
-import net.minecraft.world.entity.Mob;
-import net.minecraft.world.entity.EntityType;
-import net.minecraft.world.entity.EntityTypes;
-import net.buildertools.util.OffGridTransform;
-import net.buildertools.util.RotationData;
-import net.buildertools.entity.OffGridBlockEntity;
-import net.buildertools.registry.ModEntities;
-import net.buildertools.mixin.BlockDisplayAccessor;
-import net.buildertools.mixin.DisplayAccessor;
 import net.minecraft.world.entity.Display;
+import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntityType;
+import net.minecraft.world.entity.Mob;
+import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.item.ItemEntity;
-import net.minecraft.world.phys.AABB;
-import org.joml.Quaternionf;
-import org.joml.Vector3f;
 import net.minecraft.world.entity.player.Abilities;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.entity.decoration.painting.Painting;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.component.TypedEntityData;
+import net.minecraft.world.item.component.CustomData;
+import net.minecraft.world.level.gamerules.GameRules;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.entity.BlockEntityType;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.saveddata.WeatherData;
-import net.minecraft.world.level.storage.TagValueInput;
-import net.minecraft.world.level.storage.TagValueOutput;
+import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.Shapes;
 import net.minecraft.world.phys.shapes.VoxelShape;
-import net.minecraft.world.clock.WorldClock;
+import org.joml.Quaternionf;
+import org.joml.Vector3f;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -85,18 +78,11 @@ public final class BuilderServerHandler {
      *  vanilla placement that arrives alongside the mod's OffGridBlockPacket. */
     private static final Map<UUID, RecentOffGrid> RECENT_OFF_GRID = new HashMap<>();
 
-    private static final Logger LOGGER = LogManager.getLogger("BuilderTools");
-
     private BuilderServerHandler() {
     }
 
     public static void sendMessage(ServerPlayer player, String message) {
         player.sendSystemMessage(Component.literal("[Builder] " + message));
-    }
-
-    /** Logs a placement confirmation at debug level instead of spamming chat. */
-    static void sendDebug(ServerPlayer player, String message) {
-        LOGGER.debug("[Builder] {}: {}", player.getScoreboardName(), message);
     }
 
     /** Sends a message and plays the error sound. */
@@ -107,7 +93,8 @@ public final class BuilderServerHandler {
 
     /** Plays a sound only for the acting player (ported sound set). */
     private static void playSound(ServerPlayer player, SoundEvent sound) {
-        player.level().playSound(player, player.getX(), player.getY(), player.getZ(),
+        // 26.2 removed Player#playNotifySound; play to the player only via the level.
+        player.level().playSound(null, player.getX(), player.getY(), player.getZ(),
                 sound, SoundSource.PLAYERS, 1.0f, 1.0f);
     }
 
@@ -444,7 +431,7 @@ public final class BuilderServerHandler {
             BlockState state;
             try {
                 state = BlockStateParser.parseForBlock(level.registryAccess().lookupOrThrow(Registries.BLOCK),
-                        entry.getStringOr("state", ""), false).blockState();
+                        entry.getStringOr("state", "minecraft:air"), false).blockState();
             } catch (Exception ex) {
                 skipped++;
                 continue;
@@ -499,7 +486,7 @@ public final class BuilderServerHandler {
             sendError(player, "Position is too far away.");
             return;
         }
-        ServerLevel level = player.level();
+        ServerLevel level = (ServerLevel) player.level();
         if (!level.hasChunkAt(cell)) {
             sendError(player, "Area is not loaded.");
             return;
@@ -511,7 +498,7 @@ public final class BuilderServerHandler {
             Vec3 c = existing.center(cell);
             RotationStore.set(level, cell, new RotationData(existing.state(), yaw, pitch, billboard, c));
             recordOffGridPlacement(player, cell);
-            sendDebug(player, "Rotated block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
+            sendMessage(player, "Rotated block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
                     + (billboard ? ", billboard" : "") + ").");
             playSound(player, ModSounds.SET_CORNER_1.get());
             return;
@@ -522,7 +509,8 @@ public final class BuilderServerHandler {
             sendError(player, "Hold a block in your main hand to place.");
             return;
         }
-        BlockState state = blockItem.getBlock().defaultBlockState();
+        BlockState state = net.buildertools.util.FullSlabsCompat.normalize(
+                blockItem.getBlock().defaultBlockState());
         VoxelShape shape = state.getCollisionShape(level, BlockPos.ZERO);
         if (player.getBoundingBox().intersects(OffGridTransform.boxAround(cx, cy, cz, yaw, pitch, shape.bounds()))) {
             sendError(player, "You're in the way - move back first.");
@@ -547,7 +535,7 @@ public final class BuilderServerHandler {
         if (!player.getAbilities().instabuild) {
             held.shrink(1);
         }
-        sendDebug(player, "Placed block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
+        sendMessage(player, "Placed block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
                 + (billboard ? ", billboard" : "") + ").");
         playSound(player, ModSounds.SET_CORNER_1.get());
     }
@@ -591,7 +579,7 @@ public final class BuilderServerHandler {
      * block's item in survival and removes the entry. The vanilla cell is already air.
      */
     public static void handleFreeBlockBreak(ServerPlayer player, BlockPos cell) {
-        ServerLevel level = player.level();
+        ServerLevel level = (ServerLevel) player.level();
         RotationData data = RotationStore.get(level, cell);
         if (data == null) {
             return;
@@ -599,8 +587,8 @@ public final class BuilderServerHandler {
         if (player.distanceToSqr(Vec3.atCenterOf(cell)) > MAX_DISTANCE * MAX_DISTANCE) {
             return;
         }
+        BlockState state = data.state();
         if (!player.getAbilities().instabuild) {
-            BlockState state = data.state();
             if (state != null && !state.isAir()) {
                 level.addFreshEntity(new ItemEntity(level,
                         cell.getX() + 0.5, cell.getY() + 0.5, cell.getZ() + 0.5,
@@ -608,6 +596,9 @@ public final class BuilderServerHandler {
             }
         }
         RotationStore.remove(level, cell);
+        if (state != null && !state.isAir()) {
+            level.globalLevelEvent(2001, cell, Block.getId(state));
+        }
         playSound(player, ModSounds.SET_CORNER_2.get());
     }
 
@@ -627,7 +618,7 @@ public final class BuilderServerHandler {
             atSpot.discardWithDisplay();
             spawnLegacyPair(level, c.x, c.y, c.z, state, yaw, pitch, billboard);
             recordOffGridPlacement(player, BlockPos.containing(cx, cy, cz));
-            sendDebug(player, "Rotated legacy block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch) + ").");
+            sendMessage(player, "Rotated legacy block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch) + ").");
             playSound(player, ModSounds.SET_CORNER_1.get());
             return;
         }
@@ -647,7 +638,8 @@ public final class BuilderServerHandler {
         display.addTag(OFF_GRID_TAG);
         level.addFreshEntity(display);
 
-        OffGridBlockEntity block = ModEntities.OFF_GRID_BLOCK.get().create(level, net.minecraft.world.entity.EntitySpawnReason.EVENT);
+        OffGridBlockEntity block = ModEntities.OFF_GRID_BLOCK.get()
+                .create(level, EntitySpawnReason.COMMAND);
         if (block != null) {
             block.setRepresentedState(state);
             block.setPlacementRotation(yaw, pitch);
@@ -701,7 +693,7 @@ public final class BuilderServerHandler {
         return false;
     }
 
-    /** Removes the off-grid display in the cell (dropping its item in survival) and plays a break sound. */
+    /** Removes the off-grid display at the given model center (dropping its item in survival) and plays a break sound. */
     public static void removeOffGrid(ServerPlayer player, double cx, double cy, double cz) {
         if (player.distanceToSqr(cx, cy, cz) > MAX_DISTANCE * MAX_DISTANCE) {
             sendError(player, "Position is too far away.");
@@ -712,8 +704,8 @@ public final class BuilderServerHandler {
         if (block == null) {
             return;
         }
+        BlockState state = block.getRepresentedState();
         if (!player.getAbilities().instabuild) {
-            BlockState state = block.getRepresentedState();
             if (!state.isAir()) {
                 level.addFreshEntity(new ItemEntity(level,
                         cx, cy + 0.25, cz,
@@ -721,6 +713,9 @@ public final class BuilderServerHandler {
             }
         }
         block.discardWithDisplay();
+        if (!state.isAir()) {
+            level.globalLevelEvent(2001, BlockPos.containing(cx, cy, cz), Block.getId(state));
+        }
         playSound(player, ModSounds.SET_CORNER_2.get());
     }
 
@@ -742,7 +737,7 @@ public final class BuilderServerHandler {
         return bestBlock;
     }
 
-    /** Finds the solid off-grid block occupying the given cell, or null. */
+    /** Finds the solid off-grid block occupying the given grid cell (center inside it), or null. */
     public static OffGridBlockEntity findOffGrid(Level level, BlockPos pos) {
         for (OffGridBlockEntity block : level.getEntitiesOfClass(OffGridBlockEntity.class,
                 new AABB(pos.getX() - 1, pos.getY() - 1, pos.getZ() - 1,
@@ -784,19 +779,30 @@ public final class BuilderServerHandler {
             offGrid.setYRot(yaw);
             offGrid.setXRot(pitch);
             offGrid.setYHeadRot(yaw);
-            UUID displayUuid = offGrid.getDisplayUuid();
-            if (displayUuid != null) {
-                Entity display = ((net.minecraft.server.level.ServerLevel) player.level()).getEntity(displayUuid);
+            offGrid.getDisplayUuid().ifPresent(uuid -> {
+                Entity display = ((ServerLevel) player.level()).getEntity(uuid);
                 if (display instanceof Display.BlockDisplay blockDisplay) {
                     blockDisplay.setPos(cx - 0.5, cy - 0.5, cz - 0.5);
                     ((DisplayAccessor) (Object) blockDisplay)
                             .buildertools$setTransformation(OffGridTransform.transformation(yaw, pitch));
                 }
-            }
+            });
             offGrid.setDeltaMovement(Vec3.ZERO);
             return;
         }
         entity.teleportTo(x, y, z);
+        if (entity instanceof Painting painting && painting instanceof FlexiblePaintingAccess access && !headOnly) {
+            // 26.2 FlexiblePainting replaced arbitrary visual rotation with a surface type
+            // (wall/floor/ceiling). Map the Entity Tool's absolute pitch onto it: steep pitch
+            // lays the artwork flat on the floor/ceiling, anything else stays on the wall.
+            if (pitch > 45.0f) {
+                access.flexiblePainting$setSurfaceType(FlexiblePaintingAccess.SurfaceType.FLOOR);
+            } else if (pitch < -45.0f) {
+                access.flexiblePainting$setSurfaceType(FlexiblePaintingAccess.SurfaceType.CEILING);
+            } else {
+                access.flexiblePainting$setSurfaceType(FlexiblePaintingAccess.SurfaceType.WALL);
+            }
+        }
         if (headOnly) {
             // Hytale Alt+R "rotate head": only the head yaw changes, the body stays put.
             entity.setYHeadRot(yaw);
@@ -814,19 +820,13 @@ public final class BuilderServerHandler {
             sendError(player, "Position is too far away.");
             return;
         }
-        Registry<EntityType<?>> registry = player.level().registryAccess().lookupOrThrow(Registries.ENTITY_TYPE);
-        EntityType<?> type = registry.getValue(typeId);
-        if (type == null || type == EntityTypes.PLAYER) {
+        EntityType<?> type = BuiltInRegistries.ENTITY_TYPE.get(typeId).map(Holder::value).orElse(null);
+        if (type == null || type == net.minecraft.world.entity.EntityTypes.PLAYER) {
             sendError(player, "Unknown entity type.");
             return;
         }
-        ServerLevel level = player.level();
-        BlockPos pos = BlockPos.containing(x, y, z);
-        if (!level.hasChunkAt(pos)) {
-            sendError(player, "Area is not loaded.");
-            return;
-        }
-        Entity entity = type.spawn(level, pos, EntitySpawnReason.COMMAND);
+        ServerLevel serverLevel = (ServerLevel) player.level();
+        Entity entity = type.create(serverLevel, EntitySpawnReason.COMMAND);
         if (entity == null) {
             sendError(player, "Could not spawn entity.");
             return;
@@ -834,6 +834,12 @@ public final class BuilderServerHandler {
         entity.setPos(x, y, z);
         entity.setYRot(player.getYRot());
         entity.setXRot(0.0f);
+        if (entity instanceof Mob mob) {
+            mob.finalizeSpawn(serverLevel,
+                    serverLevel.getCurrentDifficultyAt(BlockPos.containing(x, y, z)),
+                    EntitySpawnReason.COMMAND, null);
+        }
+        serverLevel.addFreshEntity(entity);
         sendMessage(player, "Spawned " + EntityType.getKey(type).getPath() + ".");
         playSound(player, ModSounds.ENTITY_DUPLICATE.get());
     }
@@ -853,28 +859,40 @@ public final class BuilderServerHandler {
         if (entity == null) {
             return;
         }
-        Level level = player.level();
+        ServerLevel serverLevel = (ServerLevel) player.level();
 
-        // Save the source entity's data (minus its UUID) so the copy starts identical.
-        TagValueOutput out = TagValueOutput.createWithoutContext(ProblemReporter.DISCARDING);
-        entity.saveWithoutId(out);
-        CompoundTag tag = out.buildResult();
-        tag.remove("UUID");
-        tag.remove("UUIDMost");
-        tag.remove("UUIDLeast");
+        // 26.2 entity save/load is a codec-backed ValueOutput/ValueInput stream. Serialize the
+        // entity into a compound tag, drop its UUID (the level assigns a fresh one), then
+        // deserialize it back into a new instance of the same type.
+        CompoundTag data;
+        try {
+            net.minecraft.util.ProblemReporter reporter =
+                    net.minecraft.util.ProblemReporter.DISCARDING;
+            net.minecraft.world.level.storage.TagValueOutput out =
+                    net.minecraft.world.level.storage.TagValueOutput.createWithContext(reporter, serverLevel.registryAccess());
+            entity.saveWithoutId(out);
+            data = out.buildResult();
+        } catch (Throwable t) {
+            sendMessage(player, "Could not duplicate entity.");
+            return;
+        }
+        data.remove("UUID");
+        data.remove("UUIDMost");
+        data.remove("UUIDLeast");
 
-        EntityType<?> type = entity.getType();
-        Entity copy = type.create(level, EntitySpawnReason.COMMAND);
+        Entity copy = EntityType.create(entity.getType(),
+                        net.minecraft.world.level.storage.TagValueInput.create(
+                                net.minecraft.util.ProblemReporter.DISCARDING, serverLevel.registryAccess(), data),
+                        serverLevel, EntitySpawnReason.COMMAND)
+                .orElse(null);
         if (copy == null) {
             sendMessage(player, "Could not duplicate entity.");
             return;
         }
-        copy.load(TagValueInput.create(ProblemReporter.DISCARDING, level.registryAccess(), tag));
         copy.setPos(entity.getX() + 0.5, entity.getY(), entity.getZ() + 0.5);
         copy.setYRot(entity.getYRot());
         copy.setXRot(entity.getXRot());
-        copy.setYHeadRot(entity.getYRot());
-        level.addFreshEntity(copy);
+        serverLevel.addFreshEntity(copy);
         sendMessage(player, "Duplicated entity.");
         playSound(player, ModSounds.ENTITY_DUPLICATE.get());
     }
@@ -923,9 +941,9 @@ public final class BuilderServerHandler {
 
     /** Extracts block entity data carried by an item (e.g. a chest with contents). */
     private static CompoundTag blockEntityTag(ItemStack held) {
-        TypedEntityData<BlockEntityType<?>> data =
+        net.minecraft.world.item.component.TypedEntityData<?> data =
                 held.get(net.minecraft.core.component.DataComponents.BLOCK_ENTITY_DATA);
-        return data != null ? data.copyTagWithoutId() : null;
+        return data != null ? data.getUnsafe() : null;
     }
 
     /** Sets a block and restores its block entity from the given NBT, if any. */
@@ -982,77 +1000,45 @@ public final class BuilderServerHandler {
     // Creative settings (world + player)
     // ------------------------------------------------------------------
 
-    /** Frozen day times per dimension while "Pause Time" is enabled. */
-    private static final Map<ResourceKey<Level>, Long> PAUSED_DAY_TIME = new HashMap<>();
-
     /** Players who have No Clip enabled. {@code Player.tick()} resets {@code noPhysics} every
      *  tick (it is derived from spectator mode), so each tick we re-apply it for these players. */
     private static final Set<UUID> NO_CLIP_PLAYERS = new HashSet<>();
 
-    /** Returns the default clock holder for a level (empty for dimensions without one). */
-    private static java.util.Optional<Holder<WorldClock>> defaultClock(ServerLevel level) {
-        return level.dimensionType().defaultClock();
-    }
-
-    public static void applyWorldSettings(ServerPlayer player, long timeOfDay, Boolean pauseTime, int weather) {
+    public static void applyWorldSettings(ServerPlayer player, long timeOfDay, Boolean pauseTime, int weather,
+                                          Boolean smoothTerrain) {
         ServerLevel level = (ServerLevel) player.level();
         if (timeOfDay >= 0) {
-            defaultClock(level).ifPresent(clock -> level.clockManager().setTotalTicks(clock, timeOfDay));
-            // Keep the frozen time in sync when the slider moves while paused.
-            PAUSED_DAY_TIME.put(level.dimension(), timeOfDay);
+            // 26.2 replaced the per-level day time with the world-clock system.
+            level.dimensionTypeRegistration().value().defaultClock().ifPresent(clock ->
+                    level.getServer().clockManager().setTotalTicks(clock, timeOfDay));
         }
         if (pauseTime != null) {
-            if (pauseTime) {
-                PAUSED_DAY_TIME.putIfAbsent(level.dimension(), level.getDefaultClockTime());
-            } else {
-                PAUSED_DAY_TIME.remove(level.dimension());
-            }
+            // Pause Time = stop the day/night cycle the vanilla way, so everything else keeps
+            // running (mobs, redstone) while the sun freezes in place.
+            level.getGameRules().set(
+                    net.minecraft.world.level.gamerules.GameRules.ADVANCE_TIME,
+                    !pauseTime, level.getServer());
         }
         if (weather != net.buildertools.network.packet.WorldSettingsPacket.SKIP_WEATHER) {
-            WeatherData weatherData = level.getWeatherData();
             switch (weather) {
-                case 0 -> {
-                    weatherData.setClearWeatherTime(6000);
-                    weatherData.setRainTime(0);
-                    weatherData.setThunderTime(0);
-                    weatherData.setRaining(false);
-                    weatherData.setThundering(false);
-                    weatherData.setDirty();
-                }
-                case 1 -> {
-                    weatherData.setClearWeatherTime(0);
-                    weatherData.setRainTime(6000);
-                    weatherData.setThunderTime(0);
-                    weatherData.setRaining(true);
-                    weatherData.setThundering(false);
-                    weatherData.setDirty();
-                }
-                case 2 -> {
-                    weatherData.setClearWeatherTime(0);
-                    weatherData.setRainTime(6000);
-                    weatherData.setThunderTime(0);
-                    weatherData.setRaining(true);
-                    weatherData.setThundering(true);
-                    weatherData.setDirty();
-                }
+                case 0 -> level.getServer().setWeatherParameters(6000, 0, false, false);
+                case 1 -> level.getServer().setWeatherParameters(0, 6000, true, false);
+                case 2 -> level.getServer().setWeatherParameters(0, 6000, true, true);
                 default -> {
                 }
             }
         }
-        sendMessage(player, "Updated world settings.");
-    }
-
-    /** Holds the day/night cycle still for every paused dimension (called every server tick). */
-    public static void tickPausedLevels(MinecraftServer server) {
-        if (PAUSED_DAY_TIME.isEmpty()) {
-            return;
-        }
-        for (ServerLevel level : server.getAllLevels()) {
-            Long frozen = PAUSED_DAY_TIME.get(level.dimension());
-            if (frozen != null) {
-                defaultClock(level).ifPresent(clock -> level.clockManager().setTotalTicks(clock, frozen));
+        if (smoothTerrain != null) {
+            // Smooth Terrain world setting: applies the bundled Surface Nets meshing on every
+            // client (and the integrated/local server) and re-meshes the chunks.
+            io.github.favasur.smoothterrain.config.SmoothTerrainConfigImpl.Server.setEnabled(smoothTerrain);
+            net.buildertools.network.packet.SmoothTerrainTogglePacket packet =
+                    new net.buildertools.network.packet.SmoothTerrainTogglePacket(smoothTerrain);
+            for (ServerPlayer p : level.players()) {
+                p.connection.send(packet);
             }
         }
+        sendMessage(player, "Updated world settings.");
     }
 
     public static void applyPlayerAbilities(ServerPlayer player, float flySpeed, Boolean noClip, Boolean fly) {

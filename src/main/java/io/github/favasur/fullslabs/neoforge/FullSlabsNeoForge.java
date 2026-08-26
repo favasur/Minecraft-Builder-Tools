@@ -1,43 +1,60 @@
 package io.github.favasur.fullslabs.neoforge;
 
 import io.github.favasur.fullslabs.FullSlabs;
-import io.github.favasur.fullslabs.block.entity.MixedSlabBlockEntity;
-import io.github.favasur.fullslabs.compat.FullSlabsCompat;
-import io.github.favasur.fullslabs.config.Config;
-import io.github.favasur.fullslabs.config.neoforge.ControlsImpl;
-import io.github.favasur.fullslabs.neoforge.client.FullSlabsNeoForgeClient;
-import net.neoforged.api.distmarker.Dist;
+import io.github.favasur.fullslabs.client.PlacementOverlay;
+import net.minecraft.client.DeltaTracker;
+import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.GuiGraphics;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.common.Mod;
-import net.neoforged.fml.loading.FMLEnvironment;
-import net.neoforged.neoforge.client.event.ModelEvent;
-import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
-import net.neoforged.neoforge.client.model.data.ModelProperty;
-import net.neoforged.neoforge.common.NeoForge;
+import net.neoforged.neoforge.client.event.RegisterGuiLayersEvent;
 
 /**
- * NeoForge entry point for the bundled FullSlabs mod (modid "fullslabs", shipped inside the
- * Builder Tools jar). Ported from FullSlabs 4.0.3 (MC 1.21.9) to NeoForge 1.21.1.
+ * NeoForge 1.21.1 entry point for the bundled FullSlabs mod (modid "fullslabs", shipped inside
+ * the Builder Tools jar). The vertical-slab capability is grafted directly onto every
+ * {@link net.minecraft.world.level.block.SlabBlock} by the shared mixins, so there is nothing to
+ * register; the entry point bootstraps the shared init hook and registers the screen-space
+ * slab-placement overlay as a GUI layer rendered above all vanilla layers.
  */
 @Mod(FullSlabs.MODID)
 public final class FullSlabsNeoForge {
 
-	/** The block-entity model data property carrying the two halves of a mixed slab. */
-	public static final ModelProperty<MixedSlabBlockEntity.ModelContext> MIXED_CONTEXT_MODEL_PROPERTY = new ModelProperty<>();
+    public FullSlabsNeoForge(IEventBus modEventBus) {
+        FullSlabs.LOGGER.debug("FullSlabs (NeoForge 1.21.1) constructing");
+        FullSlabs.init();
+        modEventBus.addListener(this::registerGuiLayers);
+    }
 
-	public FullSlabsNeoForge(IEventBus modBus) {
-		Config.configDir = net.neoforged.fml.loading.FMLPaths.CONFIGDIR.get();
-		FullSlabs.init(modBus);
-		FullSlabsCompat.init();
-		io.github.favasur.fullslabs.variants.VariantRegistry.register(modBus);
+    private void registerGuiLayers(RegisterGuiLayersEvent event) {
+        event.registerAboveAll(FullSlabs.id("placement_overlay"), this::renderOverlay);
+    }
 
-		if (FMLEnvironment.dist.isClient()) {
-			modBus.addListener((RegisterKeyMappingsEvent event) -> ControlsImpl.register(event));
-			modBus.addListener((ModelEvent.RegisterAdditional event) -> FullSlabsNeoForgeClient.registerAdditional(event));
-			modBus.addListener((ModelEvent.ModifyBakingResult event) -> FullSlabsNeoForgeClient.modifyBakingResult(event));
-			modBus.addListener(FullSlabsNeoForgeClient::clientSetup);
-			NeoForge.EVENT_BUS.addListener(FullSlabsNeoForgeClient::renderOverlay);
-			Config.loadClient();
-		}
-	}
+    private void renderOverlay(GuiGraphics guiGraphics, DeltaTracker deltaTracker) {
+        PlacementOverlay.render(new PlacementOverlay.OverlayDraw() {
+            @Override
+            public int width() {
+                return guiGraphics.guiWidth();
+            }
+
+            @Override
+            public int height() {
+                return guiGraphics.guiHeight();
+            }
+
+            @Override
+            public void fill(int x1, int y1, int x2, int y2, int color) {
+                guiGraphics.fill(x1, y1, x2, y2, color);
+            }
+
+            @Override
+            public void hLine(int x1, int x2, int y, int color) {
+                guiGraphics.hLine(x1, x2, y, color);
+            }
+
+            @Override
+            public void vLine(int x1, int y1, int y2, int color) {
+                guiGraphics.vLine(x1, y1, y2, color);
+            }
+        }, Minecraft.getInstance());
+    }
 }

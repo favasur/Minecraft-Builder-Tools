@@ -7,23 +7,22 @@ import net.buildertools.item.RulerToolItem;
 import net.buildertools.item.ScatterToolItem;
 import net.buildertools.item.SelectionToolItem;
 import net.buildertools.item.SmoothToolItem;
-import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
-import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
-import net.fabricmc.fabric.api.event.player.AttackEntityCallback;
-import net.fabricmc.fabric.api.event.player.UseBlockCallback;
-import net.fabricmc.fabric.api.event.player.UseEntityCallback;
-import net.fabricmc.fabric.api.networking.v1.ServerPlayConnectionEvents;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerPlayer;
-import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.item.Item;
+import net.neoforged.bus.api.SubscribeEvent;
+import net.neoforged.neoforge.event.entity.player.AttackEntityEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerEvent;
+import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.neoforge.event.RegisterCommandsEvent;
+import net.neoforged.neoforge.event.tick.PlayerTickEvent;
 
 /**
- * Server-side handlers. The client cancels the equivalent interactions before any packet is sent,
- * so the handlers here are mostly a safety net for clients that (deliberately or not) send the
- * vanilla interaction packets while holding a builder tool.
+ * Server-side handlers. The client cancels the equivalent events before any packet is sent, so the
+ * handlers here are mostly a safety net for clients that (deliberately or not) send the vanilla
+ * interaction packets while holding a builder tool.
  */
 public final class ServerEvents {
     private ServerEvents() {
@@ -39,83 +38,96 @@ public final class ServerEvents {
                 || item instanceof PaintToolItem;
     }
 
-    public static void register() {
-        AttackBlockCallback.EVENT.register((player, level, hand, pos, direction) -> {
-            if (isBuilderTool(player.getMainHandItem().getItem())) {
-                return InteractionResult.FAIL;
-            }
-            return InteractionResult.PASS;
-        });
+    @SubscribeEvent
+    public static void onLeftClickBlock(PlayerInteractEvent.LeftClickBlock event) {
+        if (event.getLevel().isClientSide()) {
+            return;
+        }
+        if (isBuilderTool(event.getEntity().getMainHandItem().getItem())) {
+            event.setCanceled(true);
+        }
+    }
 
-        UseBlockCallback.EVENT.register((player, level, hand, hitResult) -> {
-            if (!level.isClientSide()) {
-                Item item = player.getMainHandItem().getItem();
-                if (isBuilderTool(item)) {
-                    return InteractionResult.FAIL;
-                }
-                if (item instanceof BlockItem) {
-                    // Off-grid blocks are placed via OffGridBlockPacket, but the vanilla use-item
-                    // packet for the same click may still arrive. Cancel the server's own placement
-                    // so a cell does not end up with both a grid block and its off-grid display.
-                    BlockPos cell = hitResult.getBlockPos().relative(hitResult.getDirection());
-                    if (BuilderServerHandler.isRecentOffGridPlacement(player, cell)
-                            || RotationStore.hasRotation(level, cell)
-                            || BuilderServerHandler.findOffGrid(level, cell) != null
-                            || BuilderServerHandler.vanillaPlacementOverlapsOffGrid(level, cell)) {
-                        return InteractionResult.FAIL;
-                    }
-                }
-                return InteractionResult.PASS;
+    @SubscribeEvent
+    public static void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
+        if (event.getLevel().isClientSide()) {
+            return;
+        }
+        Player player = event.getEntity();
+        Item item = player.getMainHandItem().getItem();
+        if (isBuilderTool(item)) {
+            event.setCanceled(true);
+            return;
+        }
+        if (item instanceof BlockItem) {
+            // Off-grid blocks are placed via OffGridBlockPacket, but the vanilla use-item packet for
+            // the same click may still arrive. Cancel the server's own placement so a cell does not
+            // end up with both a grid block and its off-grid display. Off-grid blocks are real
+            // geometry too: a vanilla block may not be placed into a cell its rotated model
+            // penetrates (flush-adjacent, touching placements are still allowed).
+            BlockPos cell = event.getPos().relative(event.getFace());
+            if (BuilderServerHandler.isRecentOffGridPlacement(player, cell)
+                    || RotationStore.hasRotation(event.getLevel(), cell)
+                    || BuilderServerHandler.findOffGrid(event.getLevel(), cell) != null
+                    || BuilderServerHandler.vanillaPlacementOverlapsOffGrid(event.getLevel(), cell)) {
+                event.setCanceled(true);
             }
-            if (isBuilderTool(player.getMainHandItem().getItem())) {
-                return InteractionResult.FAIL;
-            }
-            return InteractionResult.PASS;
-        });
+        }
+    }
 
-        UseEntityCallback.EVENT.register((player, level, hand, entity, hitResult) -> {
-            // Swallow interactions (e.g. opening a villager trade GUI) while holding any builder tool.
-            if (isBuilderTool(player.getMainHandItem().getItem())) {
-                return InteractionResult.FAIL;
-            }
-            return InteractionResult.PASS;
-        });
+    @SubscribeEvent
+    public static void onEntityInteract(PlayerInteractEvent.EntityInteract event) {
+        if (event.getLevel().isClientSide()) {
+            return;
+        }
+        // Swallow interactions (e.g. opening a villager trade GUI) while holding any builder tool.
+        if (isBuilderTool(event.getEntity().getMainHandItem().getItem())) {
+            event.setCanceled(true);
+        }
+    }
 
-        AttackEntityCallback.EVENT.register((player, level, hand, entity, hitResult) -> {
-            if (isBuilderTool(player.getMainHandItem().getItem())) {
-                return InteractionResult.FAIL;
-            }
-            return InteractionResult.PASS;
-        });
+    @SubscribeEvent
+    public static void onAttackEntity(AttackEntityEvent event) {
+        Player player = event.getEntity();
+        if (isBuilderTool(player.getMainHandItem().getItem())) {
+            event.setCanceled(true);
+        }
+    }
 
-        CommandRegistrationCallback.EVENT.register((dispatcher, buildContext, environment) ->
-                BuilderCommand.register(dispatcher, buildContext));
+    @SubscribeEvent
+    public static void onRegisterCommands(RegisterCommandsEvent event) {
+        BuilderCommand.register(event);
+    }
 
-        ServerTickEvents.END_SERVER_TICK.register(server -> {
-            // Player.tick() resets noPhysics every tick, so keep it true while No Clip is on.
-            for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-                if (BuilderServerHandler.hasNoClip(player)) {
-                    player.noPhysics = true;
-                }
-            }
-            // Keeps the day/night cycle frozen while "Pause Time" is enabled in the Creative Settings.
-            BuilderServerHandler.tickPausedLevels(server);
-        });
+    @SubscribeEvent
+    public static void onPlayerTick(PlayerTickEvent.Post event) {
+        if (event.getEntity().level().isClientSide()) {
+            return;
+        }
+        // Player.tick() resets noPhysics every tick, so keep it true while No Clip is on.
+        if (BuilderServerHandler.hasNoClip(event.getEntity())) {
+            event.getEntity().noPhysics = true;
+        }
+    }
 
-        ServerPlayConnectionEvents.JOIN.register((handler, sender, server) -> {
-            if (handler.getPlayer() instanceof ServerPlayer serverPlayer) {
-                // Send the rotation layer so every rotated block renders rotated on this client.
-                RotationStore.syncAllTo(serverPlayer);
-            }
-        });
+    @SubscribeEvent
+    public static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
+        if (event.getEntity() instanceof ServerPlayer serverPlayer) {
+            // Send the rotation layer so every rotated block renders rotated on this client.
+            RotationStore.syncAllTo(serverPlayer);
+            // Send the current Smooth Terrain world setting so this client matches the world.
+            net.buildertools.network.FabricNetwork.sendToPlayer(serverPlayer, new net.buildertools.network.packet.SmoothTerrainTogglePacket(
+                    io.github.favasur.smoothterrain.config.SmoothTerrainConfig.Server.collisionsEnabled));
+        }
+    }
 
-        ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
-            if (handler.getPlayer() instanceof ServerPlayer serverPlayer) {
-                UndoStore.remove(serverPlayer);
-                ClipboardStore.remove(serverPlayer);
-                BuilderServerHandler.removeNoClip(serverPlayer);
-                BuilderServerHandler.removeRecentOffGrid(serverPlayer.getUUID());
-            }
-        });
+    @SubscribeEvent
+    public static void onPlayerLoggedOut(PlayerEvent.PlayerLoggedOutEvent event) {
+        if (event.getEntity() instanceof ServerPlayer serverPlayer) {
+            UndoStore.remove(serverPlayer);
+            ClipboardStore.remove(serverPlayer);
+            BuilderServerHandler.removeNoClip(serverPlayer);
+            BuilderServerHandler.removeRecentOffGrid(serverPlayer.getUUID());
+        }
     }
 }

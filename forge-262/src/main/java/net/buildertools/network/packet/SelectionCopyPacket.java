@@ -8,7 +8,7 @@ import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Player;
-import net.minecraftforge.event.network.CustomPayloadEvent;
+import net.minecraftforge.event.network.CustomPayloadEvent.Context;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
@@ -36,11 +36,11 @@ public record SelectionCopyPacket(BlockPos corner1, BlockPos corner2) implements
         return TYPE;
     }
 
-    public static void handle(SelectionCopyPacket payload, CustomPayloadEvent.Context context) {
+    public static void handle(SelectionCopyPacket payload, Context context) {
         context.enqueueWork(() -> {
-            ServerPlayer player = context.getSender();
-            if (player != null) {
-                BuilderServerHandler.copySelection(player, payload.corner1(), payload.corner2());
+            ServerPlayer serverPlayer = context.getSender();
+            if (serverPlayer != null) {
+                BuilderServerHandler.copySelection(serverPlayer, payload.corner1(), payload.corner2());
             }
         });
     }

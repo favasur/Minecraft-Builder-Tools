@@ -18,6 +18,31 @@ java.toolchain.languageVersion = JavaLanguageVersion.of(25)
 sourceSets {
     main {
         java.srcDir('../shared/flexiblepainting-262/src/main/java')
+        // Canonical FullSlabs core (blocks, handlers, mixins) adapted to the 26.2 API; loader
+        // entrypoints and mixin configs stay target-local.
+        java.srcDir('../shared/fullslabs-262/src/main/java')
+        // Canonical Smooth Terrain mesh/collision core used by the copied Builder Tools bridge.
+        // Loader bootstrap, rendering, networking, and mixin entrypoints stay target-local.
+        java.srcDir('../src/main/java/io/github/favasur/smoothterrain')
+        // 26.2 API-adapted copies of these canonical core files live in the module's compat dir.
+        java.exclude 'config/SmoothTerrainConfig.java'
+        java.exclude 'util/Area.java'
+        java.exclude 'mesh/MeshCache.java'
+        java.exclude 'collision/CollisionHandler.java'
+        java.exclude 'client/**'
+        java.exclude 'hooks/Hooks.java'
+        java.exclude 'hooks/ClientHooks.java'
+        java.exclude 'network/**'
+        java.exclude 'neoforge/**'
+        java.exclude 'platform/IClientPlatform.java'
+        java.exclude 'platform/IMixinPlatform.java'
+        java.exclude 'mixin/**'
+        java.exclude 'config/SmoothTerrainConfigImpl.java'
+        java.exclude 'platform/IPlatform.java'
+        java.exclude 'platform/PlatformLoader.java'
+        java.exclude 'hooks/trait/**'
+        java.exclude 'smoothable/SmoothableHandler.java'
+        java.exclude 'util/BlockStateSerializer.java'
     }
 }
 

@@ -1,0 +1,165 @@
+package io.github.favasur.fullslabs.client;
+
+import io.github.favasur.fullslabs.block.SlabVertical;
+import io.github.favasur.fullslabs.config.Config;
+import io.github.favasur.fullslabs.config.Controls;
+import io.github.favasur.fullslabs.util.SlabPlacement;
+import net.minecraft.client.Camera;
+import net.minecraft.client.Minecraft;
+import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
+import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.BlockItem;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.block.SlabBlock;
+import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.level.block.state.properties.BlockStateProperties;
+import net.minecraft.world.level.block.state.properties.SlabType;
+import net.minecraft.world.phys.AABB;
+import net.minecraft.world.phys.BlockHitResult;
+import org.joml.Matrix4f;
+import org.joml.Vector2f;
+import org.joml.Vector3f;
+import org.joml.Vector4f;
+
+/**
+ * Screen-space "slab-placement overlay": while the player holds a slab item, the volume the
+ * would-be placed slab occupies (against the targeted block face, honoring the graft's placement
+ * rules) is projected onto the HUD and highlighted with a semi-transparent fill plus a colored
+ * edge. Colors come from {@link Config}; the overlay can be toggled through {@link Controls}.
+ *
+ * <p>Drawing goes through {@link OverlayDraw}, a tiny loader-neutral surface each loader maps
+ * onto its own GUI API ({@code GuiGraphicsExtractor} on 26.2). The projection reuses the
+ * camera's frame view-rotation-projection matrix, so it stays aligned with the world render
+ * (including dynamic fov from sprinting or item use).
+ */
+public final class PlacementOverlay {
+
+    /** Minimal drawing surface; each loader maps it onto its own GUI drawing API. */
+    public interface OverlayDraw {
+        int width();
+
+        int height();
+
+        void fill(int x1, int y1, int x2, int y2, int color);
+
+        void hLine(int x1, int x2, int y, int color);
+
+        void vLine(int x1, int y1, int y2, int color);
+    }
+
+    private PlacementOverlay() {
+    }
+
+    public static void render(OverlayDraw draw, Minecraft mc) {
+        if (!Controls.isOverlayActive() || mc.player == null || mc.level == null) {
+            return;
+        }
+        Config.load();
+        if (!(mc.hitResult instanceof BlockHitResult hit)) {
+            return;
+        }
+        SlabBlock slab = heldSlab(mc.player);
+        if (slab == null) {
+            return;
+        }
+        BlockPos pos = hit.getBlockPos();
+        AABB volume = targetVolume(mc, slab, mc.level.getBlockState(pos), pos, hit);
+        if (volume == null) {
+            return;
+        }
+        float minX = Float.MAX_VALUE;
+        float minY = Float.MAX_VALUE;
+        float maxX = -Float.MAX_VALUE;
+        float maxY = -Float.MAX_VALUE;
+        for (int i = 0; i < 8; i++) {
+            Vector2f p = project(draw, mc,
+                    (i & 1) == 0 ? volume.minX : volume.maxX,
+                    (i & 2) == 0 ? volume.minY : volume.maxY,
+                    (i & 4) == 0 ? volume.minZ : volume.maxZ);
+            if (p == null) {
+                return; // part of the volume is behind the camera
+            }
+            minX = Math.min(minX, p.x);
+            minY = Math.min(minY, p.y);
+            maxX = Math.max(maxX, p.x);
+            maxY = Math.max(maxY, p.y);
+        }
+        int x1 = (int) Math.floor(minX);
+        int y1 = (int) Math.floor(minY);
+        int x2 = (int) Math.ceil(maxX);
+        int y2 = (int) Math.ceil(maxY);
+        if (x2 <= x1 || y2 <= y1) {
+            return;
+        }
+        draw.fill(x1, y1, x2, y2, Config.fillColor);
+        draw.hLine(x1, x2, y1, Config.edgeColor);
+        draw.hLine(x1, x2, y2, Config.edgeColor);
+        draw.vLine(x1, y1, y2, Config.edgeColor);
+        draw.vLine(x2, y1, y2, Config.edgeColor);
+    }
+
+    private static SlabBlock heldSlab(Player player) {
+        for (ItemStack stack : new ItemStack[]{player.getMainHandItem(), player.getOffhandItem()}) {
+            if (stack.getItem() instanceof BlockItem blockItem && blockItem.getBlock() instanceof SlabBlock slab) {
+                return slab;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The AABB (in world space) of the slab volume the current click would place. A click on a
+     * same-material slab merges it into a full double slab (unless it is a vertical slab clicked
+     * from outside its volume, which places a new vertical slab against the clicked side);
+     * otherwise the new slab lands in the clicked block if replaceable, or in the block across
+     * the clicked face, standing per the placement mode.
+     */
+    private static AABB targetVolume(Minecraft mc, SlabBlock slab, BlockState clicked, BlockPos pos, BlockHitResult hit) {
+        if (clicked.getBlock() == slab) {
+            if (SlabVertical.isVertical(clicked) && !SlabVertical.isInsideSlab(clicked, pos, hit.getLocation())) {
+                return placedVolume(mc, slab, clicked, pos, hit);
+            }
+            return new AABB(pos);
+        }
+        return placedVolume(mc, slab, clicked, pos, hit);
+    }
+
+    private static AABB placedVolume(Minecraft mc, SlabBlock slab, BlockState clicked, BlockPos pos, BlockHitResult hit) {
+        BlockPos landing = clicked.canBeReplaced() ? pos : pos.relative(hit.getDirection());
+        if (!mc.level.getBlockState(landing).canBeReplaced()) {
+            return null;
+        }
+        Direction target = SlabPlacement.getTargetedDirection(
+                Controls.getPlacementMode(mc.player.getUUID()), hit.getDirection(),
+                mc.player.getDirection(), pos, hit.getLocation());
+        BlockState result = SlabVertical.getTargetedState(slab, hit.getDirection(), target, mc.player.getYRot());
+        AABB aabb;
+        if (SlabVertical.isVertical(result)) {
+            aabb = SlabVertical.shape(result).bounds();
+        } else {
+            aabb = switch (result.getValue(BlockStateProperties.SLAB_TYPE)) {
+                case TOP -> new AABB(0.0, 0.5, 0.0, 1.0, 1.0, 1.0);
+                case DOUBLE -> new AABB(0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
+                default -> new AABB(0.0, 0.0, 0.0, 1.0, 0.5, 1.0);
+            };
+        }
+        return aabb.move(landing);
+    }
+
+    /** Projects a world-space point to scaled GUI coordinates; null when behind the camera. */
+    private static Vector2f project(OverlayDraw draw, Minecraft mc, double x, double y, double z) {
+        Camera camera = mc.gameRenderer.mainCamera();
+        Vector3f rel = new Vector3f((float) x, (float) y, (float) z).sub(camera.position().toVector3f());
+        Matrix4f vp = camera.getViewRotationProjectionMatrix(new Matrix4f());
+        Vector4f clip = new Vector4f(rel, 1.0f);
+        vp.transform(clip);
+        if (clip.w <= 0.0f) {
+            return null;
+        }
+        float invW = 1.0f / clip.w;
+        return new Vector2f(
+                (clip.x * invW * 0.5f + 0.5f) * (float) draw.width(),
+                (0.5f - clip.y * invW * 0.5f) * (float) draw.height());
+    }
+}

@@ -33,4 +33,22 @@ ordering="NONE"
 side="BOTH"
 
 [[mixins]]
+config="buildertools.mixins.json"
+
+[[mixins]]
 config="buildertools.flexiblepainting.mixins.json"
+
+[[mixins]]
+config="buildertools.smoothterrain.mixins.json"
+
+[[mixins]]
+config="fullslabs.mixins.json"
+
+[[mods]]
+modId="fullslabs"
+version="${mod_version}"
+displayName="FullSlabs"
+authors="Micalobia; ported by Builder Tools contributors"
+description='''
+Vertical and mixed slabs for every slab block in the game (vanilla and other mods), ported from FullSlabs 4.0.3 to Forge 26.2.
+'''

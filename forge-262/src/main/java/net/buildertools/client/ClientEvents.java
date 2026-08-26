@@ -1,6 +1,5 @@
 package net.buildertools.client;
 
-import net.buildertools.client.settings.BuilderSettings;
 import net.buildertools.entity.OffGridBlockEntity;
 import net.buildertools.item.EntityToolItem;
 import net.buildertools.item.LaserToolItem;
@@ -16,6 +15,8 @@ import net.buildertools.network.packet.EntityFreezePacket;
 import net.buildertools.network.packet.EntityTransformPacket;
 import net.buildertools.network.packet.FreeBlockBreakPacket;
 import net.buildertools.network.packet.OffGridBlockPacket;
+import net.buildertools.server.RotationStore;
+import net.buildertools.util.RotationData;
 import net.buildertools.network.packet.PaintPacket;
 import net.buildertools.network.packet.PastePacket;
 import net.buildertools.network.packet.ScatterPacket;
@@ -25,20 +26,18 @@ import net.buildertools.network.packet.SelectionSyncPacket;
 import net.buildertools.network.packet.SmoothPacket;
 import net.buildertools.network.packet.StretchPacket;
 import net.buildertools.network.packet.UndoPacket;
+import net.buildertools.client.settings.BuilderSettings;
+import net.buildertools.collision.RotatedCollisionProvider;
 import net.buildertools.registry.ModSounds;
-import net.buildertools.server.RotationStore;
-import net.buildertools.util.RotationData;
 import net.buildertools.selection.RulerState;
 import net.buildertools.selection.SelectionHandles;
 import net.buildertools.selection.SelectionManager;
-import net.minecraft.client.DeltaTracker;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
+import net.minecraft.world.level.Level;
 import net.minecraft.core.Direction;
 import net.minecraft.network.chat.Component;
-import net.minecraft.resources.Identifier;
 import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
@@ -50,74 +49,74 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
-import net.minecraft.world.phys.HitResult;import net.minecraft.world.phys.Vec3;
+import net.minecraft.world.phys.HitResult;
+import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
 
 import java.util.List;
-import java.util.Optional;
+
+import java.util.Locale;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.api.distmarker.OnlyIn;
 import net.minecraftforge.client.event.AddGuiOverlayLayersEvent;
 import net.minecraftforge.client.event.InputEvent;
-import net.minecraftforge.client.gui.overlay.ForgeLayer;
+import net.minecraftforge.client.gui.overlay.ForgeLayeredDraw;
 import net.minecraftforge.event.TickEvent;
+import net.minecraftforge.event.TickEvent.ClientTickEvent;
+import net.minecraftforge.event.TickEvent.PlayerTickEvent;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
-import net.minecraftforge.eventbus.api.listener.SubscribeEvent;
+import net.minecraft.client.DeltaTracker;
 import org.lwjgl.glfw.GLFW;
-
-import java.util.Locale;
 
 @OnlyIn(Dist.CLIENT)
 public final class ClientEvents {
     private ClientEvents() {
     }
 
-    static {
-        // Load the client model-shape provider: it registers itself as the source of the
-        // rendered-model base shape for the rotated-block collision voxelization, so rotated
-        // stairs/fences collide with the same detail the player sees.
-        ModelShapeProvider.ensureLoaded();
+    public static void initializeGeometry() {
+        RotatedCollisionProvider.setProvider(RotatedBlockTriangles::triangles);
     }
 
     // ------------------------------------------------------------------
     // Tool interactions
     // ------------------------------------------------------------------
 
-    @SubscribeEvent
     public static boolean onLeftClickBlock(PlayerInteractEvent.LeftClickBlock event) {
+        boolean cancelled = false;
         Player player = event.getEntity();
         Item item = player.getMainHandItem().getItem();
         if (item instanceof SelectionToolItem) {
             // Handle-grabbing is done in onMouseButtonPre (so it works from any distance and even
             // when clicking air); any other left click here just sets corner 1.
+            cancelled = true;
             if (event.getLevel().isClientSide() && !HandleDragState.isDragging()) {
                 SelectionManager.setCorner1(event.getPos());
                 player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
             }
-            return true; // cancel
         } else if (item instanceof RulerToolItem) {
+            cancelled = true;
             if (event.getLevel().isClientSide()) {
                 RulerState.setPointA(event.getPos());
                 player.playSound(ModSounds.RULER_POINT_A.get(), 1.0f, 1.0f);
                 showRulerDistance(player);
             }
-            return true; // cancel
         } else if (isBrush(item)) {
+            cancelled = true;
             if (event.getLevel().isClientSide()) {
                 applyBrush(player, event.getPos(), item);
             }
-            return true; // cancel
         } else if (item instanceof LaserToolItem) {
-            return true; // cancel
+            cancelled = true;
         }
-        return false;
+        return !cancelled;
     }
 
-    @SubscribeEvent
     public static boolean onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
+        boolean cancelled = false;
         Player player = event.getEntity();
         Item item = player.getMainHandItem().getItem();
         if (item instanceof SelectionToolItem) {
+            cancelled = true;
             if (event.getLevel().isClientSide()) {
                 if (player.isShiftKeyDown()) {
                     SelectionManager.clearSelection();
@@ -127,10 +126,10 @@ public final class ClientEvents {
                     player.playSound(ModSounds.SET_CORNER_2.get(), 1.0f, 1.0f);
                 }
             }
-            return true; // cancel
         } else if (item instanceof EntityToolItem) {
             // Right-clicking a block never moves the selected entity anywhere; entity selection
             // and free-move dragging happen on the entity hit itself (see onMouseButtonPre).
+            cancelled = true;
             if (event.getLevel().isClientSide()) {
                 if (EntityRotateState.isActive()) {
                     // Right-click confirms and leaves rotate mode (Hytale "cancel movement").
@@ -140,8 +139,8 @@ public final class ClientEvents {
                     SelectionManager.clearSelectedEntity();
                 }
             }
-            return true; // cancel
         } else if (item instanceof RulerToolItem) {
+            cancelled = true;
             if (event.getLevel().isClientSide()) {
                 if (player.isShiftKeyDown()) {
                     RulerState.clear();
@@ -152,22 +151,19 @@ public final class ClientEvents {
                     showRulerDistance(player);
                 }
             }
-            return true; // cancel
         } else if (isBrush(item)) {
+            cancelled = true;
             if (event.getLevel().isClientSide()) {
                 applyBrush(player, event.getPos(), item);
             }
-            return true; // cancel
         } else if (item instanceof LaserToolItem) {
-            return true; // cancel
+            cancelled = true;
         } else if (item instanceof BlockItem) {
-            // Off-grid placement. With R pressed the block is placed at the preview cell with the
-            // adjusted rotation; otherwise, clicking ON an off-grid block places a new block into
-            // the cell next to it (inheriting its rotation), and clicking a normal block whose
-            // target cell touches an off-grid block inherits the rotation too, so a rotated
-            // formation can be built block by block.
+            // Off-grid placement. With R pressed the block is placed at the preview cell;
+            // otherwise, clicking an off-grid block extends its rotated grid.
             if (event.getLevel().isClientSide()) {
                 if (BlockRotateState.isActive()) {
+                    cancelled = true;
                     BlockPos cell = BlockRotateState.getTarget();
                     if (cell != null) {
                         Vec3 center = BlockRotateState.getCenter();
@@ -177,7 +173,6 @@ public final class ClientEvents {
                     }
                     BlockRotateState.stop();
                     player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
-                    return true; // cancel
                 } else {
                     // 1) Aiming at an off-grid block (its cell is air, so the vanilla block
                     // raycast would pass through it and hit the block behind): place a new block
@@ -203,48 +198,40 @@ public final class ClientEvents {
                                 Vec3 newCenter = neighborCenter.add(offset);
                                 BlockPos newCell = BlockPos.containing(newCenter);
                                 if (canPlaceRotatedGridBlock(player, newCell, newCenter, rot[0], rot[1])) {
+                                    cancelled = true;
                                     sendBlockRotation(newCell, newCenter, rot[0], rot[1], rot[2] == 1.0f);
                                     player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
-                                    return true; // cancel
                                 }
                             }
                         }
                     } else if (ogHit != null && ogHit.distSq < eyeDistSq(player, event.getHitVec().getLocation())) {
-                        // 2) Legacy off-grid entity (its cell is air, so the vanilla block
-                        // raycast would pass through it and hit the block behind): place a new
-                        // block FLUSH against the clicked rotated face, inheriting the rotation.
+                        // 1) Legacy off-grid entity (its cell is air, so the vanilla block raycast
+                        // would pass through it and hit the block behind): place a new block FLUSH
+                        // against the clicked rotated face, inheriting the rotation. Only when the
+                        // entity is closer than the vanilla block hit, so clicking a real wall in
+                        // front of a legacy block still behaves normally.
                         Vec3 center = flushPlacementCenter(ogHit.block, ogHit.normal);
                         if (canPlaceOffGrid(player, center, ogHit.block.getPlacementYaw(), ogHit.block.getPlacementPitch())) {
+                            cancelled = true;
                             ClientPackets.sendToServer(new OffGridBlockPacket(
                                     center.x, center.y, center.z,
                                     ogHit.block.getPlacementYaw(), ogHit.block.getPlacementPitch(), false,
                                     ogHit.block.isBillboard()));
                             player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
-                            return true; // cancel
                         }
-                    } else {
-                        // 3) Normal block click: let the vanilla placement proceed - the target
-                        // cell simply receives a plain block. The click is NOT hijacked into a
-                        // rotated placement: a rotated NEIGHBOR (e.g. a block floating in the air
-                        // above the cell) must not silently turn the player's normal block into a
-                        // rotated one, nor make the placement fail when the inherited rotation
-                        // would cut through the neighbor's geometry. To keep building a rotated
-                        // formation, click the rotated block itself (branch 1 above extends the
-                        // plane from its faces).
-                        return false;
                     }
                 }
             }
-            return false;
         }
-        return false;
+        return !cancelled;
     }
 
-    @SubscribeEvent
     public static boolean onEntityInteract(PlayerInteractEvent.EntityInteractSpecific event) {
+        boolean cancelled = false;
         Player player = event.getEntity();
         Item item = player.getMainHandItem().getItem();
         if (item instanceof EntityToolItem) {
+            cancelled = true;
             if (event.getLevel().isClientSide()) {
                 EntityRotateState.stop();
                 Entity target = event.getTarget();
@@ -257,11 +244,11 @@ public final class ClientEvents {
                     player.playSound(ModSounds.ENTITY_SELECT.get(), 1.0f, 1.0f);
                 }
             }
-            return true; // cancel
         } else if (item instanceof BlockItem && event.getTarget() instanceof OffGridBlockEntity ogBlock) {
             // Right-clicking an off-grid block directly (entity hit, not a block hit): place a new
             // block FLUSH against the clicked rotated face, inheriting the rotation, so a stratum
             // of rotated blocks can be built side by side.
+            cancelled = true;
             if (event.getLevel().isClientSide()) {
                 OffGridHit ogHit = raycastOffGridHit(player, 6.0);
                 Vec3 normal = ogHit != null ? ogHit.normal : faceFromLook(player, ogBlock);
@@ -274,12 +261,11 @@ public final class ClientEvents {
                     player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
                 }
             }
-            return true; // cancel
         } else if (isBuilderTool(item)) {
             // Don't let right-clicking an entity (e.g. a villager) open its GUI while a tool is held.
-            return true; // cancel
+            cancelled = true;
         }
-        return false;
+        return !cancelled;
     }
 
     // ------------------------------------------------------------------
@@ -318,7 +304,7 @@ public final class ClientEvents {
         Vec3 b = Vec3.atCenterOf(RulerState.getPointB());
         BlockPos pa = RulerState.getPointA();
         BlockPos pb = RulerState.getPointB();
-        ((LocalPlayer) player).sendOverlayMessage(Component.literal(String.format(Locale.ROOT,
+        player.sendOverlayMessage(Component.literal(String.format(Locale.ROOT,
                 "Ruler: %.1f blocks  (X %d, Y %d, Z %d)",
                 a.distanceTo(b),
                 Math.abs(pb.getX() - pa.getX()),
@@ -330,14 +316,14 @@ public final class ClientEvents {
     // Selection handle drag: press grabs a handle from any distance, release drops it
     // ------------------------------------------------------------------
 
-    @SubscribeEvent
     public static boolean onMouseButtonPre(InputEvent.MouseButton.Pre event) {
+        boolean cancelled = false;
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.gui.screen() != null || minecraft.player == null) {
-            return false;
+            return true;
         }
         if (event.getAction() != GLFW.GLFW_PRESS) {
-            return false;
+            return true;
         }
         Player player = minecraft.player;
         ItemStack held = player.getMainHandItem();
@@ -349,11 +335,11 @@ public final class ClientEvents {
             // scaled along the dragged axis to fill the new region.
             SelectionHandles.Hit handleHit = raycastHandle(player, 64.0);
             if (handleHit != null) {
+                cancelled = true;
                 Vec3 grab = player.getEyePosition(1.0f).add(player.getLookAngle().scale(handleHit.t()));
                 HandleDragState.start(handleHit.handle().axis(), handleHit.handle().positive(),
                         grab, player.getLookAngle(), isAltDown(minecraft));
                 player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
-                return true; // cancel
             }
         } else if (isBrush(item)
                 && (event.getButton() == GLFW.GLFW_MOUSE_BUTTON_LEFT || event.getButton() == GLFW.GLFW_MOUSE_BUTTON_RIGHT)) {
@@ -370,8 +356,37 @@ public final class ClientEvents {
                 target = BlockPos.containing(pos);
             }
             if (target != null) {
+                cancelled = true;
                 applyBrush(player, target, item);
-                return true; // cancel
+            }
+        } else if (event.getButton() == GLFW.GLFW_MOUSE_BUTTON_LEFT && !isBuilderTool(item)
+                && !BlockRotateState.isActive()) {
+            // Mine a rotated block like a normal block with ANY item (or an empty hand):
+            // creative breaks instantly; in survival the dig is progressive (progress accumulates
+            // while LMB is held and the cursor stays on the block - see FreeBlockMining.tick /
+            // OffGridMining.tick) instead of dropping it on the first hit like a painting.
+            BlockPos freeCell = aimedFreeBlockCell(player);
+            if (freeCell != null) {
+                cancelled = true;
+                if (player.getAbilities().instabuild) {
+                    ClientPackets.sendToServer(new FreeBlockBreakPacket(freeCell));
+                    player.playSound(ModSounds.SET_CORNER_2.get(), 1.0f, 1.0f);
+                } else {
+                    FreeBlockMining.start(freeCell);
+                }
+            } else {
+                OffGridBlockEntity mineTarget = raycastOffGridBlock(player, 6.0);
+                if (mineTarget != null) {
+                    cancelled = true;
+                    if (player.getAbilities().instabuild) {
+                        Vec3 c = mineTarget.modelCenter();
+                        ClientPackets.sendToServer(new OffGridBlockPacket(
+                                c.x, c.y, c.z, 0.0f, 0.0f, true, false));
+                        player.playSound(ModSounds.SET_CORNER_2.get(), 1.0f, 1.0f);
+                    } else {
+                        OffGridMining.start(mineTarget);
+                    }
+                }
             }
         } else if (item instanceof EntityToolItem && event.getButton() == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
             // Entity interaction. This uses the raw mouse press so it works on every client path,
@@ -381,6 +396,7 @@ public final class ClientEvents {
             if (hit != null && hit.getType() == HitResult.Type.ENTITY) {
                 Entity target = ((EntityHitResult) hit).getEntity();
                 if (target != null) {
+                    cancelled = true;
                     Entity current = SelectionManager.getSelectedEntity();
                     if (EntityRotateState.isActive()) {
                         // Right-click confirms and leaves rotate mode.
@@ -399,86 +415,101 @@ public final class ClientEvents {
                         SelectionManager.setSelectedEntity(target);
                         player.playSound(ModSounds.ENTITY_SELECT.get(), 1.0f, 1.0f);
                     }
-                    return true; // cancel
                 }
             }
-        } else if (event.getButton() == GLFW.GLFW_MOUSE_BUTTON_LEFT && !isBuilderTool(item)
-                && !BlockRotateState.isActive()) {
-            // Mine a rotated block like a normal block with ANY item (or an empty hand):
-            // creative breaks instantly; in survival the dig is progressive (progress accumulates
-            // while LMB is held and the cursor stays on the block - see FreeBlockMining.tick /
-            // OffGridMining.tick) instead of dropping it on the first hit like a painting.
-            BlockPos freeCell = aimedFreeBlockCell(player);
-            if (freeCell != null) {
-                if (player.getAbilities().instabuild) {
-                    ClientPackets.sendToServer(new FreeBlockBreakPacket(freeCell));
-                    player.playSound(ModSounds.SET_CORNER_2.get(), 1.0f, 1.0f);
-                } else {
-                    FreeBlockMining.start(freeCell);
-                }
-                return true; // cancel
-            }
-            OffGridBlockEntity mineTarget = raycastOffGridBlock(player, 6.0);
-            if (mineTarget != null) {
-                if (player.getAbilities().instabuild) {
-                    Vec3 c = mineTarget.modelCenter();
-                    ClientPackets.sendToServer(new OffGridBlockPacket(
-                            c.x, c.y, c.z, 0.0f, 0.0f, true, false));
-                    player.playSound(ModSounds.SET_CORNER_2.get(), 1.0f, 1.0f);
-                } else {
-                    OffGridMining.start(mineTarget);
-                }
-                return true; // cancel
-            }
-            return false;
         } else if (item instanceof BlockItem && event.getButton() == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
             if (BlockRotateState.isActive()) {
                 // Left click is reserved for hold-to-rotate; suppress the vanilla attack.
-                return true; // cancel
+                cancelled = true;
             }
-            return false;
         } else if (item instanceof BlockItem && event.getButton() == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
-            // Right-clicking a placed off-grid block places the next block flush against the
-            // clicked rotated face with the same rotation, so a rotated formation can be built
-            // by clicking block after block - no R needed for every piece.
-            if (!BlockRotateState.isActive()) {
+            // Preview active: right-click ANYWHERE (a block face OR empty air) confirms the
+            // placement at the preview cell with the adjusted rotation. The vanilla RightClickBlock
+            // event never fires on an air click, so this raw path is the one that must send the
+            // packet - air placement would otherwise do nothing.
+            if (BlockRotateState.isActive()) {
+                cancelled = true;
+                BlockPos cell = BlockRotateState.getTarget();
+                if (cell != null) {
+                    Vec3 center = BlockRotateState.getCenter();
+                    sendBlockRotation(BlockPos.containing(center), center,
+                            BlockRotateState.getYawDeg(), BlockRotateState.getPitchDeg(),
+                            BlockRotateState.isBillboard());
+                    player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                }
+                BlockRotateState.stop();
+                return false;
+            }
+            // Right-clicking a placed off-grid block places the next block against its side with
+            // the same rotation, so a rotated formation can be built by clicking block after
+            // block - no R needed for every piece. Layer blocks snap onto the neighbor's rotated
+            // grid; legacy entities keep the flush-against-rotated-face placement.
+            {
                 OffGridHit hit = raycastOffGridHit(player, 6.0);
-                if (hit != null && hit.isBlock()) {
-                    float[] rot = rotationOfBlock(player.level(), hit.cell());
-                    Vec3 neighborCenter = centerOfBlock(player.level(), hit.cell());
-                    if (rot != null) {
-                        Vec3 offset = OffGridTransform.rotatedGridOffset(
-                                OffGridTransform.rotation(rot[0], rot[1]), neighborCenter,
-                                stateBoundsOfBlock(player.level(), hit.cell()),
-                                player.getEyePosition(1.0f), player.getLookAngle());
-                        if (offset != null) {
-                            Vec3 newCenter = neighborCenter.add(offset);
-                            BlockPos newCell = BlockPos.containing(newCenter);
-                            if (canPlaceRotatedGridBlock(player, newCell, newCenter, rot[0], rot[1])) {
-                                sendBlockRotation(newCell, newCenter, rot[0], rot[1], rot[2] == 1.0f);
-                                player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
-                                return true; // cancel
+                if (hit != null) {
+                    if (hit.isBlock()) {
+                        float[] rot = rotationOfBlock(player.level(), hit.cell());
+                        Vec3 neighborCenter = centerOfBlock(player.level(), hit.cell());
+                        if (rot != null) {
+                            Vec3 offset = OffGridTransform.rotatedGridOffset(
+                                    OffGridTransform.rotation(rot[0], rot[1]), neighborCenter,
+                                    stateBoundsOfBlock(player.level(), hit.cell()),
+                                    player.getEyePosition(1.0f), player.getLookAngle());
+                            if (offset != null) {
+                                Vec3 newCenter = neighborCenter.add(offset);
+                                BlockPos newCell = BlockPos.containing(newCenter);
+                                if (canPlaceRotatedGridBlock(player, newCell, newCenter, rot[0], rot[1])) {
+                                    cancelled = true;
+                                    sendBlockRotation(newCell, newCenter, rot[0], rot[1], rot[2] == 1.0f);
+                                    player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                                }
                             }
                         }
+                    } else {
+                        Vec3 center = flushPlacementCenter(hit.block, hit.normal);
+                        if (canPlaceOffGrid(player, center, hit.block.getPlacementYaw(), hit.block.getPlacementPitch())) {
+                            cancelled = true;
+                            ClientPackets.sendToServer(new OffGridBlockPacket(
+                                    center.x, center.y, center.z,
+                                    hit.block.getPlacementYaw(), hit.block.getPlacementPitch(), false,
+                                    hit.block.isBillboard()));
+                            player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                        }
                     }
-                } else if (hit != null) {
-                    Vec3 center = flushPlacementCenter(hit.block, hit.normal);
-                    if (canPlaceOffGrid(player, center, hit.block.getPlacementYaw(), hit.block.getPlacementPitch())) {
-                        ClientPackets.sendToServer(new OffGridBlockPacket(
-                                center.x, center.y, center.z,
-                                hit.block.getPlacementYaw(), hit.block.getPlacementPitch(), false,
-                                hit.block.isBillboard()));
+                } else if (BuilderSettings.isAirPlacement()) {
+                    // Air Placement: right-clicking empty air places the held block at the fixed
+                    // air-place distance, inheriting the rotation of any off-grid neighbor (or a
+                    // plain unrotated block when there is none). This is the Hytale technique -
+                    // clicking the air lays a block at the cursor's distance, no surface needed.
+                    BlockPos cell = BlockPos.containing(player.getEyePosition(1.0f)
+                            .add(player.getLookAngle().scale(BuilderSettings.getAirPlaceDistance())));
+                    float[] inherited = findInheritedRotation(player, cell);
+                    if (canPlaceOffGridBlock(player, cell)) {
+                        float yaw = 0.0f;
+                        float pitch = 0.0f;
+                        boolean billboard = false;
+                        if (inherited != null
+                                && !wouldPenetrateRotated(player, cell, inherited[0], inherited[1])) {
+                            yaw = inherited[0];
+                            pitch = inherited[1];
+                            billboard = inherited[2] == 1.0f;
+                        } else if (inherited != null
+                                && wouldPenetrateRotated(player, cell, 0.0f, 0.0f)) {
+                            // Neither the inherited rotation nor a plain block fits (a rotated
+                            // neighbor's geometry occupies the cell) - leave the click unhandled
+                            // instead of sending a placement the server would reject.
+                            return true;
+                        }
+                        cancelled = true;
+                        sendBlockRotation(cell, Vec3.atCenterOf(cell), yaw, pitch, billboard);
                         player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
-                        return true; // cancel
                     }
                 }
             }
-            return false;
         }
-        return false;
+        return !cancelled;
     }
 
-    @SubscribeEvent
     public static void onMouseButtonPost(InputEvent.MouseButton.Post event) {
         if (event.getButton() == GLFW.GLFW_MOUSE_BUTTON_RIGHT && event.getAction() == GLFW.GLFW_RELEASE
                 && EntityDragState.isDragging()) {
@@ -528,22 +559,23 @@ public final class ClientEvents {
     // Scroll wheel: rotate or nudge the selected entity
     // ------------------------------------------------------------------
 
-    @SubscribeEvent
     public static boolean onMouseScroll(InputEvent.MouseScrollingEvent event) {
+        boolean cancelled = false;
         Minecraft minecraft = Minecraft.getInstance();
         Player player = minecraft.player;
         if (player == null || minecraft.gui.screen() != null) {
-            return false;
+            return true;
         }
         Item held = player.getMainHandItem().getItem();
         if (isBrush(held) && BuilderSettings.isAirPlacement()) {
             // "Use the mouse scroll wheel to increase/decrease place distance."
+            cancelled = true;
             double delta = Math.signum(event.getDeltaY());
             float next = Math.round((BuilderSettings.getAirPlaceDistance() + (float) delta) * 2) / 2f;
             BuilderSettings.setAirPlaceDistance(Math.max(3.0f, Math.min(32.0f, next)));
-            ((LocalPlayer) player).sendOverlayMessage(Component.literal(
+            player.sendOverlayMessage(Component.literal(
                     "Air placement distance: " + BuilderSettings.getAirPlaceDistance()));
-            return true; // cancel
+            return false;
         }
         Entity entity;
         if (held instanceof EntityToolItem) {
@@ -557,12 +589,12 @@ public final class ClientEvents {
             // scrolling the hotbar (Hytale-style Entity Tool zoom).
             entity = raycastOffGridBlock(player, 6.0);
         } else {
-            return false;
+            return true;
         }
         if (entity == null || entity.isRemoved()) {
-            return false;
+            return true;
         }
-
+        cancelled = true;
         double delta = Math.signum(event.getDeltaY());
         if (player.isShiftKeyDown()) {
             // Shift + scroll: move one block up/down (from the model center for off-grid blocks,
@@ -596,7 +628,7 @@ public final class ClientEvents {
                     false));
         }
         player.playSound(ModSounds.ENTITY_MOVE.get(), 1.0f, 1.0f);
-        return true; // cancel
+        return !cancelled;
     }
 
     // ------------------------------------------------------------------
@@ -608,31 +640,15 @@ public final class ClientEvents {
      * derived from spectator mode). The PlayerMixin re-applies it right after the reset and before
      * movement runs for that tick; this extra re-apply is a harmless safety net.
      */
-    @SubscribeEvent
-    public static void onPlayerTick(TickEvent.PlayerTickEvent.Post event) {
+    public static void onPlayerTick(PlayerTickEvent.Post event) {
         Player player = event.player();
         if (player.level().isClientSide() && BuilderSettings.isNoClip()) {
             player.noPhysics = true;
         }
     }
 
-    /**
-     * Renders the control-hints legend in the corner while a builder tool is held. Forge 26.2
-     * dropped RenderGuiEvent; the legend is a layer on the vanilla root draw stack instead.
-     */
-    @SubscribeEvent
-    public static void onAddGuiOverlayLayers(AddGuiOverlayLayersEvent event) {
-        event.getLayeredDraw().add(
-                Identifier.fromNamespaceAndPath("buildertools", "legend"),
-                new ForgeLayer() {
-                    @Override
-                    public void extract(GuiGraphicsExtractor gg, DeltaTracker dt) {
-                        renderLegend(gg);
-                    }
-                });
-    }
-
-    private static void renderLegend(GuiGraphicsExtractor graphics) {
+    /** Renders the control-hints legend in the corner while a builder tool is held. */
+    public static void renderLegend(GuiGraphicsExtractor graphics, DeltaTracker deltaTracker) {
         if (!BuilderSettings.isDisplayLegend()) {
             return;
         }
@@ -689,8 +705,7 @@ public final class ClientEvents {
      * In creative mode, pressing E opens the Creative Settings window instead of the
      * vanilla inventory (the vanilla creative item picker is reachable from a button inside it).
      */
-    @SubscribeEvent
-    public static void onClientTickPre(TickEvent.ClientTickEvent.Pre event) {
+    public static void onClientTickPre(ClientTickEvent.Pre event) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player == null || minecraft.gui.screen() != null) {
             return;
@@ -702,21 +717,25 @@ public final class ClientEvents {
             while (minecraft.options.keyChat.consumeClick()) {
             }
         }
-        if (minecraft.player.getAbilities().instabuild) {
-            if (minecraft.options.keyInventory.consumeClick()) {
-                if (minecraft.player.getMainHandItem().getItem() instanceof EntityToolItem) {
-                    // E with the Entity Tool held opens its Hytale-style spawn/rotate interface.
-                    minecraft.gui.setScreen(new EntityToolScreen((net.minecraft.client.player.LocalPlayer) minecraft.player));
-                } else {
-                    minecraft.gui.setScreen(new CreativeSettingsScreen((net.minecraft.client.player.LocalPlayer) minecraft.player));
-                }
+        if (minecraft.gameMode == null || !minecraft.gameMode.getPlayerMode().isCreative()) {
+            return;
+        }
+        if (minecraft.options.keyInventory.consumeClick()) {
+            if (minecraft.player.getMainHandItem().getItem() instanceof EntityToolItem) {
+                // E with the Entity Tool held opens its Hytale-style spawn/rotate interface.
+                minecraft.gui.setScreen(new EntityToolScreen((net.minecraft.client.player.LocalPlayer) minecraft.player));
+            } else {
+                minecraft.gui.setScreen(new CreativeSettingsScreen((net.minecraft.client.player.LocalPlayer) minecraft.player));
             }
         }
     }
 
-    @SubscribeEvent
-    public static void onClientTick(TickEvent.ClientTickEvent.Post event) {
+    public static void onClientTick(ClientTickEvent.Post event) {
         Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft.level == null) {
+            // Left the world: drop the rotated-block mirror so a new world starts clean.
+            RotationStore.clearClient();
+        }
         Player player = minecraft.player;
         if (player == null) {
             return;
@@ -931,23 +950,6 @@ public final class ClientEvents {
                 origin, dir, maxT);
     }
 
-    private static BlockPos getPasteAnchor(Minecraft minecraft) {
-        HitResult hit = minecraft.hitResult;
-        if (hit != null && hit.getType() == HitResult.Type.BLOCK) {
-            return ((BlockHitResult) hit).getBlockPos().immutable();
-        }
-        Player player = minecraft.player;
-        if (player != null) {
-            return player.blockPosition();
-        }
-        return null;
-    }
-
-    /**
-     * Finds the rotation inherited from an off-grid block ADJACENT to the given cell (never the
-     * cell itself - that would re-plant the block already occupying it). Returns null when there
-     * is no off-grid neighbor, so normal grid placement proceeds.
-     */
     /**
      * Finds the rotation (and billboard flag) inherited from an off-grid block ADJACENT to the
      * given cell (never the cell itself - that would re-plant the block already occupying it).
@@ -972,15 +974,23 @@ public final class ClientEvents {
     }
 
     /** The rotation of a rotated block cell (from the mod's rotation layer), or null. */
+    private static float[] rotationOfBlock(Level level, BlockPos pos) {
+        RotationData rot = RotationStore.get(level, pos);
+        if (rot != null) {
+            return new float[]{rot.yaw(), rot.pitch(), rot.billboard() ? 1.0f : 0.0f};
+        }
+        return null;
+    }
+
     /** The exact world-space model center of a rotated block cell (fractional for blocks snapped
      *  onto a rotated neighbor's grid), or the cell center when the cell has no layer entry. */
-    private static Vec3 centerOfBlock(net.minecraft.world.level.Level level, BlockPos pos) {
+    private static Vec3 centerOfBlock(Level level, BlockPos pos) {
         RotationData rot = RotationStore.get(level, pos);
         return rot != null ? rot.center(pos) : Vec3.atCenterOf(pos);
     }
 
     /** The cell-local collision-shape bounds (0..1) of the rotated block in the cell. */
-    private static AABB stateBoundsOfBlock(net.minecraft.world.level.Level level, BlockPos pos) {
+    private static AABB stateBoundsOfBlock(Level level, BlockPos pos) {
         RotationData rot = RotationStore.get(level, pos);
         return rot != null ? rot.state().getCollisionShape(level, pos).bounds()
                 : level.getBlockState(pos).getCollisionShape(level, pos).bounds();
@@ -1008,22 +1018,15 @@ public final class ClientEvents {
             return false;
         }
         BlockState state = blockItem.getBlock().defaultBlockState();
+        state = net.buildertools.util.FullSlabsCompat.normalize(state);
         AABB shape = state.getCollisionShape(player.level(), BlockPos.ZERO).bounds();
         AABB footprint = OffGridTransform.boxAround(center.x, center.y, center.z, yaw, pitch, shape);
         return !player.getBoundingBox().intersects(footprint);
     }
 
-    private static float[] rotationOfBlock(net.minecraft.world.level.Level level, BlockPos pos) {
-        RotationData rot = RotationStore.get(level, pos);
-        if (rot != null) {
-            return new float[]{rot.yaw(), rot.pitch(), rot.billboard() ? 1.0f : 0.0f};
-        }
-        return null;
-    }
-
     /** The actual block state of a rotated block (the vanilla cell stays air - the state lives
      *  in the mod's layer). */
-    private static BlockState representedStateOf(net.minecraft.world.level.Level level, BlockPos pos) {
+    private static BlockState representedStateOf(Level level, BlockPos pos) {
         RotationData rot = RotationStore.get(level, pos);
         if (rot != null) {
             return rot.state();
@@ -1073,6 +1076,8 @@ public final class ClientEvents {
 
     /** Returns the solid off-grid block occupying the given cell, or null (client-side query). */
     private static OffGridBlockEntity findOffGridEntity(net.minecraft.world.level.Level level, BlockPos pos) {
+        // Entity tags are not synced to clients in 1.21.1, so the entity class alone identifies
+        // off-grid blocks here (all OffGridBlockEntity instances are off-grid blocks).
         for (OffGridBlockEntity block : level.getEntitiesOfClass(OffGridBlockEntity.class,
                 new AABB(pos.getX() - 1, pos.getY() - 1, pos.getZ() - 1,
                         pos.getX() + 2, pos.getY() + 2, pos.getZ() + 2))) {
@@ -1094,6 +1099,8 @@ public final class ClientEvents {
         return hit != null ? hit.block : null;
     }
 
+    /** The solid off-grid block under the cursor, the world-space face normal of the rotated
+     *  model it hit, the exact hit point and the squared distance from the eye. */
     /**
      * A placement target: either a legacy off-grid ENTITY ({@code block} set, fractional flush
      * placement) or an off-grid BLOCK ({@code cell} + {@code face} set, grid-adjacent placement).
@@ -1252,11 +1259,13 @@ public final class ClientEvents {
     }
 
     /**
-     * Whether a new off-grid block centered at {@code center} can be placed: the spot is not
-     * already occupied by another off-grid block, no existing off-grid block's ACTUAL rotated
-     * model penetrates the new one (touching is fine - flush-adjacent rotated blocks are legal),
-     * the vanilla block there is replaceable, and the player is not standing inside it. (The
-     * server re-validates authoritatively.)
+     * Whether a new off-grid block centered at {@code center} can be placed - judged by the
+     * NEIGHBOR geometry, not the vanilla XYZ grid: the exact same spot is a re-rotate, no other
+     * off-grid block's ACTUAL rotated model may penetrate the new one (touching is fine - a block
+     * placed flush against a rotated neighbor's face lands at a fractional center and is legal),
+     * and the player must not stand inside the new model. The vanilla cell the fractional center
+     * happens to fall in is irrelevant - rotated blocks are neighbor-dependent. (The server
+     * re-validates authoritatively.)
      */
     private static boolean canPlaceOffGrid(Player player, Vec3 center, float yaw, float pitch) {
         ItemStack held = player.getMainHandItem();
@@ -1281,18 +1290,6 @@ public final class ClientEvents {
         }
         AABB footprint = OffGridTransform.boxAround(center.x, center.y, center.z, yaw, pitch, newShape.bounds());
         return !player.getBoundingBox().intersects(footprint);
-    }
-
-    /** The off-grid block whose model center is within 0.6 of the given point, or null. */
-    private static OffGridBlockEntity findOffGridEntityAt(net.minecraft.world.level.Level level, Vec3 center) {
-        for (OffGridBlockEntity block : level.getEntitiesOfClass(OffGridBlockEntity.class,
-                new AABB(center.x - 0.75, center.y - 0.75, center.z - 0.75,
-                        center.x + 0.75, center.y + 0.75, center.z + 0.75))) {
-            if (block.modelCenter().distanceToSqr(center) < 0.36) {
-                return block;
-            }
-        }
-        return null;
     }
 
     /**
@@ -1340,5 +1337,38 @@ public final class ClientEvents {
     private static Vec3 faceFromLook(Player player, OffGridBlockEntity block) {
         Vec3 delta = block.modelCenter().subtract(player.getEyePosition(1.0f));
         return delta.normalize();
+    }
+
+    private static BlockPos getPasteAnchor(Minecraft minecraft) {
+        HitResult hit = minecraft.hitResult;
+        if (hit != null && hit.getType() == HitResult.Type.BLOCK) {
+            return ((BlockHitResult) hit).getBlockPos().immutable();
+        }
+        Player player = minecraft.player;
+        if (player != null) {
+            return player.blockPosition();
+        }
+        return null;
+    }
+
+    /**
+     * Wires every client handler onto Forge 65.1.1's typed event buses. Handlers that can
+     * suppress the vanilla behavior return boolean (false cancels the event); the rest are
+     * plain consumers.
+     */
+    public static void register() {
+        PlayerInteractEvent.LeftClickBlock.BUS.addListener(ClientEvents::onLeftClickBlock);
+        PlayerInteractEvent.RightClickBlock.BUS.addListener(ClientEvents::onRightClickBlock);
+        PlayerInteractEvent.EntityInteractSpecific.BUS.addListener(ClientEvents::onEntityInteract);
+        InputEvent.MouseButton.Pre.BUS.addListener(ClientEvents::onMouseButtonPre);
+        InputEvent.MouseButton.Post.BUS.addListener(ClientEvents::onMouseButtonPost);
+        InputEvent.MouseScrollingEvent.BUS.addListener(ClientEvents::onMouseScroll);
+        TickEvent.PlayerTickEvent.Post.BUS.addListener(ClientEvents::onPlayerTick);
+        TickEvent.ClientTickEvent.Pre.BUS.addListener(ClientEvents::onClientTickPre);
+        TickEvent.ClientTickEvent.Post.BUS.addListener(ClientEvents::onClientTick);
+        AddGuiOverlayLayersEvent.BUS.addListener(event -> event.getLayeredDraw()
+                .addAbove(ForgeLayeredDraw.PRE_SLEEP_STACK,
+                        net.minecraft.resources.Identifier.fromNamespaceAndPath("buildertools", "legend"),
+                        ClientEvents::renderLegend));
     }
 }

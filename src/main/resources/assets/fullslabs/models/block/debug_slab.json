@@ -1,8 +1,0 @@
-{
-    "parent": "minecraft:block/slab",
-    "textures": {
-        "bottom": "fullslabs:block/debug",
-        "top": "fullslabs:block/debug",
-        "side": "fullslabs:block/debug"
-    }
-}

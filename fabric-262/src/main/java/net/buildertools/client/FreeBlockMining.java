@@ -8,6 +8,8 @@ import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 import org.lwjgl.glfw.GLFW;
 
 /**
@@ -17,6 +19,7 @@ import org.lwjgl.glfw.GLFW;
  * mining a normal block. When the bar fills, {@link #tick} returns true and the caller sends the
  * break packet (the server drops the block's item in survival).
  */
+@OnlyIn(Dist.CLIENT)
 public final class FreeBlockMining {
     private static BlockPos target;
     private static float progress;

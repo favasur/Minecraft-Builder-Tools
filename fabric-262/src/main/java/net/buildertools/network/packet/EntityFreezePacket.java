@@ -6,8 +6,8 @@ import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerPlayer;
-
-import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.world.entity.player.Player;
+import net.neoforged.neoforge.network.handling.IPayloadContext;
 
 import static net.buildertools.BuilderToolsMod.MODID;
 
@@ -35,10 +35,12 @@ public record EntityFreezePacket(int entityId, boolean freeze) implements Custom
         return TYPE;
     }
 
-    public static void handle(EntityFreezePacket payload, ServerPlayNetworking.Context ctx) {
-        ServerPlayer player = ctx.player();
-        ctx.server().execute(() -> {
-                BuilderServerHandler.freezeEntity(player, payload.entityId(), payload.freeze());
+    public static void handle(EntityFreezePacket payload, IPayloadContext context) {
+        context.enqueueWork(() -> {
+            Player player = context.player();
+            if (player instanceof ServerPlayer serverPlayer) {
+                BuilderServerHandler.freezeEntity(serverPlayer, payload.entityId(), payload.freeze());
+            }
         });
     }
 }

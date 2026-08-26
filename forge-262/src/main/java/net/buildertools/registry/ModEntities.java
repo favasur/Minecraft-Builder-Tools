@@ -10,7 +10,7 @@ import net.minecraft.world.entity.MobCategory;
 import net.minecraftforge.registries.DeferredRegister;
 import net.minecraftforge.registries.RegistryObject;
 
-public final class ModEntities {
+public class ModEntities {
     public static final DeferredRegister<EntityType<?>> ENTITIES =
             DeferredRegister.create(Registries.ENTITY_TYPE, BuilderToolsMod.MODID);
 
@@ -19,7 +19,7 @@ public final class ModEntities {
                     .sized(1.0f, 1.0f)
                     .noSummon()
                     .build(ResourceKey.create(Registries.ENTITY_TYPE,
-                            Identifier.fromNamespaceAndPath(BuilderToolsMod.MODID, "off_grid_block"))));
+                            Identifier.parse(BuilderToolsMod.MODID + ":off_grid_block"))));
 
     private ModEntities() {
     }

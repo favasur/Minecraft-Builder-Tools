@@ -13,8 +13,9 @@ import net.neoforged.neoforge.network.handling.IPayloadContext;
 import static net.buildertools.BuilderToolsMod.MODID;
 
 /**
- * Client -> Server: break the rotated block in the given cell of the mod's layer (drops its item
- * in survival, like breaking a normal block).
+ * Client -> Server: break the rotated block in the given cell of the mod's layer (the cell is
+ * air in the vanilla grid). The server drops the block's item in survival and removes the entry,
+ * exactly like breaking a normal block.
  */
 public record FreeBlockBreakPacket(BlockPos cell) implements CustomPacketPayload {
     public static final Type<FreeBlockBreakPacket> TYPE = new Type<>(Identifier.fromNamespaceAndPath(MODID, "free_block_break"));

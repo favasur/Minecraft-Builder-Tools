@@ -1,11 +1,13 @@
 package net.buildertools.entity;
 
+import net.buildertools.server.BuilderServerHandler;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.Registries;
+import net.minecraft.core.UUIDUtil;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.EntityDimensions;
@@ -15,14 +17,15 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.storage.ValueInput;
 import net.minecraft.world.level.storage.ValueOutput;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import org.jspecify.annotations.Nullable;
 
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -31,10 +34,6 @@ import java.util.UUID;
  * {@link net.minecraft.world.entity.Display.BlockDisplay} (linked by {@link #getDisplayUuid()})
  * renders the rotated model. The rotation (yaw/pitch) is stored here and comes from the mod's
  * placement-preview rotation interface - not from the player's facing.
- *
- * <p>26.2 note: unlike 1.21.1 there is no {@code OPTIONAL_UUID} entity-data serializer, and the
- * display link is only ever read server-side (to discard the pair), so the UUID is kept as a
- * plain field saved to NBT instead of synced entity data.</p>
  */
 public class OffGridBlockEntity extends Entity {
     private static final EntityDataAccessor<BlockState> DATA_BLOCK_STATE = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.BLOCK_STATE);
@@ -42,6 +41,11 @@ public class OffGridBlockEntity extends Entity {
     private static final EntityDataAccessor<Float> DATA_PITCH = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Boolean> DATA_COLLIDABLE = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.BOOLEAN);
     private static final EntityDataAccessor<Boolean> DATA_BILLBOARD = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.BOOLEAN);
+    // 26.2 no longer exposes an OPTIONAL_UUID entity serializer. Keep the UUID split across
+    // registered LONG/BOOLEAN serializers so the display link still synchronizes to clients.
+    private static final EntityDataAccessor<Boolean> DATA_DISPLAY_PRESENT = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.BOOLEAN);
+    private static final EntityDataAccessor<Long> DATA_DISPLAY_MOST = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.LONG);
+    private static final EntityDataAccessor<Long> DATA_DISPLAY_LEAST = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.LONG);
     /** The world-space center of the block model (rotation pivot), which can be fractional so
      *  flush-adjacent blocks form rotated strata. Everything else (collision box, visual anchor)
      *  is derived from this center, so a block placed diagonally still collides exactly where its
@@ -49,9 +53,6 @@ public class OffGridBlockEntity extends Entity {
     private static final EntityDataAccessor<Float> DATA_CX = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> DATA_CY = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> DATA_CZ = SynchedEntityData.defineId(OffGridBlockEntity.class, EntityDataSerializers.FLOAT);
-
-    /** UUID of the linked {@code BlockDisplay} that renders the rotated model (server-only). */
-    private UUID displayUuid;
 
     public OffGridBlockEntity(EntityType<?> type, Level level) {
         super(type, level);
@@ -64,6 +65,9 @@ public class OffGridBlockEntity extends Entity {
         builder.define(DATA_PITCH, 0.0f);
         builder.define(DATA_COLLIDABLE, true);
         builder.define(DATA_BILLBOARD, false);
+        builder.define(DATA_DISPLAY_PRESENT, false);
+        builder.define(DATA_DISPLAY_MOST, 0L);
+        builder.define(DATA_DISPLAY_LEAST, 0L);
         builder.define(DATA_CX, 0.0f);
         builder.define(DATA_CY, 0.0f);
         builder.define(DATA_CZ, 0.0f);
@@ -107,13 +111,23 @@ public class OffGridBlockEntity extends Entity {
         this.entityData.set(DATA_BILLBOARD, billboard);
     }
 
-    @Nullable
-    public UUID getDisplayUuid() {
-        return this.displayUuid;
+    public Optional<UUID> getDisplayUuid() {
+        if (!this.entityData.get(DATA_DISPLAY_PRESENT)) {
+            return Optional.empty();
+        }
+        return Optional.of(new UUID(this.entityData.get(DATA_DISPLAY_MOST), this.entityData.get(DATA_DISPLAY_LEAST)));
     }
 
     public void setDisplayUuid(UUID uuid) {
-        this.displayUuid = uuid;
+        if (uuid == null) {
+            this.entityData.set(DATA_DISPLAY_PRESENT, false);
+            this.entityData.set(DATA_DISPLAY_MOST, 0L);
+            this.entityData.set(DATA_DISPLAY_LEAST, 0L);
+        } else {
+            this.entityData.set(DATA_DISPLAY_MOST, uuid.getMostSignificantBits());
+            this.entityData.set(DATA_DISPLAY_LEAST, uuid.getLeastSignificantBits());
+            this.entityData.set(DATA_DISPLAY_PRESENT, true);
+        }
     }
 
     /** The world-space model center (rotation pivot). */
@@ -163,19 +177,19 @@ public class OffGridBlockEntity extends Entity {
 
     /**
      * The world-space collision box of the rotated model: the block's shape bounds rotated by the
-     * placement yaw/pitch around the model center, mapped back onto the world. Because the box is
-     * derived from the same center and rotation as the rendered display, a diagonal block collides
-     * exactly where its rotated model renders - no invisible bumps, and flush-adjacent strata stay
-     * flush.
+     * placement yaw/pitch around the model center, mapped back onto the world. Axis-aligned blocks
+     * keep the exact shape bounds centered on the model center. Because the box is derived from
+     * the same center and rotation as the rendered display, a diagonal block collides exactly
+     * where its rotated model renders - no invisible bumps, and flush-adjacent strata stay flush.
      */
     public AABB visualCollisionBox() {
         BlockState state = getRepresentedState();
         AABB shape = this.level() != null
                 ? state.getCollisionShape(this.level(), BlockPos.ZERO).bounds()
                 : new AABB(0, 0, 0, 1, 1, 1);
-        Vec3 c = modelCenter();
         return net.buildertools.util.OffGridTransform.boxAround(
-                c.x, c.y, c.z, getPlacementYaw(), getPlacementPitch(), shape);
+                modelCenter().x, modelCenter().y, modelCenter().z,
+                getPlacementYaw(), getPlacementPitch(), shape);
     }
 
     /**
@@ -187,7 +201,6 @@ public class OffGridBlockEntity extends Entity {
         return new Vec3(box.getCenter().x, box.minY, box.getCenter().z);
     }
 
-    @Override
     /**
      * Never collide via the entity's own axis-aligned bounding box. An entity can only have ONE
      * axis-aligned box, which would poke out past the rotated model at the corners (the invisible
@@ -195,7 +208,8 @@ public class OffGridBlockEntity extends Entity {
      * queries by {@link net.buildertools.mixin.CollisionGetterMixin} instead, so the player stops
      * exactly at the visible rotated faces.
      */
-    public boolean canBeCollidedWith(@Nullable Entity other) {
+    @Override
+    public boolean canBeCollidedWith(Entity other) {
         return false;
     }
 
@@ -232,9 +246,9 @@ public class OffGridBlockEntity extends Entity {
         BlockState state = getRepresentedState();
         boolean creative = source.getEntity() instanceof Player player && player.getAbilities().instabuild;
         if (!creative && !state.isAir()) {
-            this.level().playSound(null, this.getX(), this.getY(), this.getZ(),
-                    state.getSoundType().getBreakSound(), SoundSource.BLOCKS, 1.0f, 0.9f);
-            this.level().addFreshEntity(new ItemEntity(this.level(),
+            level.globalLevelEvent(2001, BlockPos.containing(this.getX(), this.getY(), this.getZ()),
+                    Block.getId(state));
+            level.addFreshEntity(new ItemEntity(level,
                     this.getX(), this.getY() + 0.25, this.getZ(),
                     new ItemStack(state.getBlock())));
         }
@@ -244,31 +258,31 @@ public class OffGridBlockEntity extends Entity {
 
     /** Removes the linked display child and this entity. */
     public void discardWithDisplay() {
-        if (this.level() instanceof ServerLevel serverLevel && this.displayUuid != null) {
-            Entity display = serverLevel.getEntity(this.displayUuid);
-            if (display != null) {
-                display.discard();
-            }
+        if (this.level() instanceof ServerLevel serverLevel) {
+            this.getDisplayUuid().ifPresent(uuid -> {
+                Entity display = serverLevel.getEntity(uuid);
+                if (display != null) {
+                    display.discard();
+                }
+            });
         }
         this.discard();
     }
 
     @Override
     protected void readAdditionalSaveData(ValueInput input) {
-        input.read("block_state", BlockState.CODEC).ifPresent(this::setRepresentedState);
+        this.setRepresentedState(input.read("block_state", BlockState.CODEC)
+                .orElse(Blocks.AIR.defaultBlockState()));
         this.setPlacementRotation(input.getFloatOr("yaw", 0.0f), input.getFloatOr("pitch", 0.0f));
-        // Blocks saved before the center was stored: derive it from the entity position,
-        // which was the bottom-center of the cell box (X/Z at cell center, Y at the base).
-        double cx = input.read("cx", com.mojang.serialization.Codec.DOUBLE).orElseGet(() -> this.getX());
-        double cy = input.read("cy", com.mojang.serialization.Codec.DOUBLE).orElseGet(() -> this.getY() + 0.5);
-        double cz = input.read("cz", com.mojang.serialization.Codec.DOUBLE).orElseGet(() -> this.getZ());
-        this.setModelCenter(cx, cy, cz);
-        input.getString("display").ifPresent(s -> {
-            try {
-                this.setDisplayUuid(UUID.fromString(s));
-            } catch (IllegalArgumentException ignored) {
-            }
-        });
+        Vec3 center = input.read("center", Vec3.CODEC).orElse(null);
+        if (center != null) {
+            this.setModelCenter(center.x, center.y, center.z);
+        } else {
+            // Blocks saved before the center was stored: derive it from the entity position,
+            // which was the bottom-center of the cell box (X/Z at cell center, Y at the base).
+            this.setModelCenter(this.getX(), this.getY() + 0.5, this.getZ());
+        }
+        input.read("display", UUIDUtil.CODEC).ifPresent(this::setDisplayUuid);
         this.setSolidCollidable(input.getBooleanOr("collidable", true));
         this.setBillboard(input.getBooleanOr("billboard", false));
     }
@@ -278,13 +292,8 @@ public class OffGridBlockEntity extends Entity {
         output.store("block_state", BlockState.CODEC, this.getRepresentedState());
         output.putFloat("yaw", this.getPlacementYaw());
         output.putFloat("pitch", this.getPlacementPitch());
-        Vec3 c = this.modelCenter();
-        output.putDouble("cx", c.x);
-        output.putDouble("cy", c.y);
-        output.putDouble("cz", c.z);
-        if (this.displayUuid != null) {
-            output.putString("display", this.displayUuid.toString());
-        }
+        output.store("center", Vec3.CODEC, this.modelCenter());
+        this.getDisplayUuid().ifPresent(uuid -> output.store("display", UUIDUtil.CODEC, uuid));
         output.putBoolean("collidable", this.isSolidCollidable());
         output.putBoolean("billboard", this.isBillboard());
     }

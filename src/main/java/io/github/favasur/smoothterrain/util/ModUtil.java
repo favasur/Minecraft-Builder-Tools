@@ -96,8 +96,13 @@ public class ModUtil {
 	}
 
 	/**
-	 * Searches neighbouring positions around a smooth block for a source fluid state.
-	 * Makes the smooth block have the fluid "extended" into it.
+	 * Searches neighbouring positions around a smooth block for a fluid state.
+	 * Makes the smooth block have the fluid "extended" into it, so the receded
+	 * smoothed surface at pool edges/bends stays covered instead of showing empty
+	 * pockets. Any non-empty fluid qualifies (source or flowing): flowing pools
+	 * (e.g. 1-wide cross channels, which never form sources) would otherwise leave
+	 * the receded cells unfilled. The returned state is the fluid's default
+	 * (source-level) state so the whole receded cell is covered.
 	 *
 	 * @return a fluid state that may not actually exist in the position
 	 */
@@ -121,8 +126,8 @@ public class ModUtil {
 
 		// Check up
 		fluidState = chunk.getFluidState(x, y + 1, z);
-		if (fluidState.isSource())
-			return fluidState;
+		if (!fluidState.isEmpty())
+			return fluidState.getType().defaultFluidState();
 
 		// Check around
 		for (var extendZ = z - extendRange; extendZ <= z + extendRange; ++extendZ) {
@@ -137,8 +142,8 @@ public class ModUtil {
 				}
 
 				fluidState = chunk.getFluidState(extendX, y, extendZ);
-				if (fluidState.isSource())
-					return fluidState;
+				if (!fluidState.isEmpty())
+					return fluidState.getType().defaultFluidState();
 			}
 		}
 		return Fluids.EMPTY.defaultFluidState();

@@ -4,15 +4,14 @@
   "package": "net.buildertools.mixin",
   "compatibilityLevel": "JAVA_25",
   "mixins": [
-    "MouseHandlerMixin",
     "PlayerMixin",
     "LocalPlayerMixin",
+    "MouseHandlerMixin",
     "DisplayAccessor",
     "BlockDisplayAccessor",
     "BlockGetterMixin",
     "LevelMixin",
     "CollisionGetterMixin",
-    "ServerGamePacketListenerImplMixin",
     "MultiPlayerGameModeMixin"
   ],
   "injectors": {

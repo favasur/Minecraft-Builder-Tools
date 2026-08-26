@@ -5,12 +5,15 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.phys.Vec3;
+import net.neoforged.api.distmarker.Dist;
+import net.neoforged.api.distmarker.OnlyIn;
 
 /**
  * Hytale-style rotate mode for the Entity Tool: press R to enter, then move the mouse - the
  * selected entity's yaw follows the cursor around it. Press Alt while entering to rotate only
  * the head instead of the whole body. Press R again (or right-click) to confirm and leave.
  */
+@OnlyIn(Dist.CLIENT)
 public final class EntityRotateState {
     private static Entity entity;
     private static boolean headMode;

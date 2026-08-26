@@ -88,19 +88,20 @@ public final class RotationStore {
      * pre-filter, then the tight rotated bounding box). Used by the collision and raycast hooks.
      */
     public static List<Map.Entry<BlockPos, RotationData>> getInBox(BlockGetter level, AABB box) {
-        AABB pre = box.inflate(1.0);
+        // Do not pre-filter by the center alone. A rotated model (and especially a block with a
+        // model offset or a custom model extending outside 0..1) can intersect the query while
+        // its pivot is outside the old two-block center window. The rotated broadphase below is
+        // deliberately conservative; the exact triangle/shape test still decides the hit.
         List<Map.Entry<BlockPos, RotationData>> result = new ArrayList<>();
         if (level instanceof ServerLevel serverLevel) {
             for (Map.Entry<BlockPos, RotationData> e : RotationSavedData.of(serverLevel).all().entrySet()) {
-                Vec3 c = e.getValue().center(e.getKey());
-                if (pre.contains(c.x, c.y, c.z) && rotatedBounds(level, e).intersects(box)) {
+                if (rotatedBounds(e).intersects(box)) {
                     result.add(e);
                 }
             }
         } else {
             for (Map.Entry<BlockPos, RotationData> e : CLIENT.entrySet()) {
-                Vec3 c = e.getValue().center(e.getKey());
-                if (pre.contains(c.x, c.y, c.z) && rotatedBounds(level, e).intersects(box)) {
+                if (rotatedBounds(e).intersects(box)) {
                     result.add(e);
                 }
             }
@@ -113,13 +114,18 @@ public final class RotationStore {
         return new ArrayList<>(CLIENT.entrySet());
     }
 
-    private static AABB rotatedBounds(BlockGetter level, Map.Entry<BlockPos, RotationData> e) {
+    private static AABB rotatedBounds(Map.Entry<BlockPos, RotationData> e) {
         BlockPos pos = e.getKey();
         RotationData data = e.getValue();
         Vec3 c = data.center(pos);
-        AABB shape = data.state().getCollisionShape(level, pos).bounds();
+        // This is only a broadphase test. Use a conservative model envelope, not the collision or
+        // outline accessor: during Entity#collide smoothable states intentionally return an empty
+        // per-cell shape, and custom blocks can render beyond the vanilla 0..1 cell. The envelope
+        // also includes normal model offsets, so the exact triangle test cannot be skipped at a
+        // protruding corner.
+        AABB modelCell = new AABB(-1.0, -1.0, -1.0, 2.0, 2.0, 2.0);
         return net.buildertools.util.OffGridTransform.boxAround(
-                c.x, c.y, c.z, data.yaw(), data.pitch(), shape);
+                c.x, c.y, c.z, data.yaw(), data.pitch(), modelCell);
     }
 
     public static void clearClient() {

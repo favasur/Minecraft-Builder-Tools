@@ -1017,13 +1017,8 @@ public final class ClientEvents {
         if (!(held.getItem() instanceof BlockItem blockItem)) {
             return false;
         }
-        BlockState state = blockItem.getBlock().defaultBlockState();
-        if (state.getBlock() instanceof io.github.favasur.fullslabs.block.VerticalSlabBlock vertical) {
-            state = vertical.defaultBlockState();
-        } else if (state.getBlock() instanceof net.minecraft.world.level.block.SlabBlock slab
-                && io.github.favasur.fullslabs.block.VerticalSlabBlock.hasVertical(slab)) {
-            state = io.github.favasur.fullslabs.block.VerticalSlabBlock.getVertical(slab).defaultBlockState();
-        }
+        BlockState state = io.github.favasur.fullslabs.block.SlabVertical.vertical(
+                blockItem.getBlock().defaultBlockState());
         AABB shape = state.getCollisionShape(player.level(), BlockPos.ZERO).bounds();
         AABB footprint = OffGridTransform.boxAround(center.x, center.y, center.z, yaw, pitch, shape);
         return !player.getBoundingBox().intersects(footprint);

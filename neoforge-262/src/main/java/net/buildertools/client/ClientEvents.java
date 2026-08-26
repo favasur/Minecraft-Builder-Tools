@@ -27,13 +27,13 @@ import net.buildertools.network.packet.SmoothPacket;
 import net.buildertools.network.packet.StretchPacket;
 import net.buildertools.network.packet.UndoPacket;
 import net.buildertools.client.settings.BuilderSettings;
+import net.buildertools.collision.RotatedCollisionProvider;
 import net.buildertools.registry.ModSounds;
 import net.buildertools.selection.RulerState;
 import net.buildertools.selection.SelectionHandles;
 import net.buildertools.selection.SelectionManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
-import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.core.Direction;
@@ -71,11 +71,8 @@ public final class ClientEvents {
     private ClientEvents() {
     }
 
-    static {
-        // Load the client model-shape provider: it registers itself as the source of the
-        // rendered-model base shape for the rotated-block collision voxelization, so rotated
-        // stairs/fences collide with the same detail the player sees.
-        ModelShapeProvider.ensureLoaded();
+    public static void initializeGeometry() {
+        RotatedCollisionProvider.setProvider(RotatedBlockTriangles::triangles);
     }
 
     // ------------------------------------------------------------------
@@ -159,11 +156,8 @@ public final class ClientEvents {
         } else if (item instanceof LaserToolItem) {
             event.setCanceled(true);
         } else if (item instanceof BlockItem) {
-            // Off-grid placement. With R pressed the block is placed at the preview cell with the
-            // adjusted rotation; otherwise, clicking ON an off-grid block places a new block into
-            // the cell next to it (inheriting its rotation), and clicking a normal block whose
-            // target cell touches an off-grid block inherits the rotation too, so a rotated
-            // formation can be built block by block.
+            // Off-grid placement. With R pressed the block is placed at the preview cell;
+            // otherwise, clicking an off-grid block extends its rotated grid.
             if (event.getLevel().isClientSide()) {
                 if (BlockRotateState.isActive()) {
                     event.setCanceled(true);
@@ -222,14 +216,6 @@ public final class ClientEvents {
                                     ogHit.block.isBillboard()));
                             player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
                         }
-                    } else {
-                        // 2) Normal block click: the target cell simply receives a plain vanilla
-                        // block. The click is NOT hijacked into a rotated placement - a rotated
-                        // NEIGHBOR (e.g. a block floating in the air above the cell) must not
-                        // silently turn the player's normal block into a rotated one, nor make
-                        // the placement fail when the inherited rotation would cut through the
-                        // neighbor's geometry. To keep building a rotated formation, click the
-                        // rotated block itself (branch 1 above extends the plane from its faces).
                     }
                 }
             }
@@ -313,7 +299,7 @@ public final class ClientEvents {
         Vec3 b = Vec3.atCenterOf(RulerState.getPointB());
         BlockPos pa = RulerState.getPointA();
         BlockPos pb = RulerState.getPointB();
-        ((LocalPlayer) player).sendOverlayMessage(Component.literal(String.format(Locale.ROOT,
+        player.sendOverlayMessage(Component.literal(String.format(Locale.ROOT,
                 "Ruler: %.1f blocks  (X %d, Y %d, Z %d)",
                 a.distanceTo(b),
                 Math.abs(pb.getX() - pa.getX()),
@@ -451,8 +437,8 @@ public final class ClientEvents {
             }
             // Right-clicking a placed off-grid block places the next block against its side with
             // the same rotation, so a rotated formation can be built by clicking block after
-            // block - no R needed for every piece. Blocks use grid adjacency; legacy entities
-            // keep the flush-against-rotated-face placement.
+            // block - no R needed for every piece. Layer blocks snap onto the neighbor's rotated
+            // grid; legacy entities keep the flush-against-rotated-face placement.
             {
                 OffGridHit hit = raycastOffGridHit(player, 6.0);
                 if (hit != null) {
@@ -582,7 +568,7 @@ public final class ClientEvents {
             double delta = Math.signum(event.getScrollDeltaY());
             float next = Math.round((BuilderSettings.getAirPlaceDistance() + (float) delta) * 2) / 2f;
             BuilderSettings.setAirPlaceDistance(Math.max(3.0f, Math.min(32.0f, next)));
-            ((LocalPlayer) player).sendOverlayMessage(Component.literal(
+            player.sendOverlayMessage(Component.literal(
                     "Air placement distance: " + BuilderSettings.getAirPlaceDistance()));
             return;
         }
@@ -730,14 +716,15 @@ public final class ClientEvents {
             while (minecraft.options.keyChat.consumeClick()) {
             }
         }
-        if (minecraft.player.getAbilities().instabuild) {
-            if (minecraft.options.keyInventory.consumeClick()) {
-                if (minecraft.player.getMainHandItem().getItem() instanceof EntityToolItem) {
-                    // E with the Entity Tool held opens its Hytale-style spawn/rotate interface.
-                    minecraft.gui.setScreen(new EntityToolScreen((net.minecraft.client.player.LocalPlayer) minecraft.player));
-                } else {
-                    minecraft.gui.setScreen(new CreativeSettingsScreen((net.minecraft.client.player.LocalPlayer) minecraft.player));
-                }
+        if (minecraft.gameMode == null || !minecraft.gameMode.getPlayerMode().isCreative()) {
+            return;
+        }
+        if (minecraft.options.keyInventory.consumeClick()) {
+            if (minecraft.player.getMainHandItem().getItem() instanceof EntityToolItem) {
+                // E with the Entity Tool held opens its Hytale-style spawn/rotate interface.
+                minecraft.gui.setScreen(new EntityToolScreen((net.minecraft.client.player.LocalPlayer) minecraft.player));
+            } else {
+                minecraft.gui.setScreen(new CreativeSettingsScreen((net.minecraft.client.player.LocalPlayer) minecraft.player));
             }
         }
     }
@@ -964,11 +951,6 @@ public final class ClientEvents {
     }
 
     /**
-     * Finds the rotation inherited from an off-grid block ADJACENT to the given cell (never the
-     * cell itself - that would re-plant the block already occupying it). Returns null when there
-     * is no off-grid neighbor, so normal grid placement proceeds.
-     */
-    /**
      * Finds the rotation (and billboard flag) inherited from an off-grid block ADJACENT to the
      * given cell (never the cell itself - that would re-plant the block already occupying it).
      * Returns {@code {yaw, pitch, billboard?1:0}} or null when there is no off-grid neighbor, so
@@ -1036,6 +1018,7 @@ public final class ClientEvents {
             return false;
         }
         BlockState state = blockItem.getBlock().defaultBlockState();
+        state = net.buildertools.util.FullSlabsCompat.normalize(state);
         AABB shape = state.getCollisionShape(player.level(), BlockPos.ZERO).bounds();
         AABB footprint = OffGridTransform.boxAround(center.x, center.y, center.z, yaw, pitch, shape);
         return !player.getBoundingBox().intersects(footprint);

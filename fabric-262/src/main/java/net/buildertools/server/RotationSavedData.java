@@ -6,89 +6,84 @@ import net.buildertools.util.RotationData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.Identifier;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.util.datafix.DataFixTypes;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.saveddata.SavedData;
 import net.minecraft.world.level.saveddata.SavedDataType;
 import net.minecraft.world.phys.Vec3;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
- * Server-side persistence for the mod's rotated-block layer, keyed by the level's data storage.
- * The layer is a map of cell -> rotation entry; 26.2 persists saved data via a
- * {@link SavedDataType} with a {@link Codec}, so the map is serialized as a list of
- * {@code {pos, state, yaw, pitch, billboard}} entries.
+ * The mod's rotation layer for a dimension: which cells have a rotated player-placed block and
+ * its yaw/pitch. The block in each cell remains the original vanilla block - this data is the
+ * "neighbor-dependent grid" the rotation lives in. Persisted with the world automatically.
  */
 public class RotationSavedData extends SavedData {
-    private final Map<BlockPos, RotationData> map = new HashMap<>();
+    public static final String NAME = "buildertools_rotations";
 
-    /** One layer entry serialized as {pos, state, yaw, pitch, billboard, center}. */
-    private record Entry(BlockPos pos, BlockState state, float yaw, float pitch, boolean billboard, Vec3 center) {
-        private static final Codec<Entry> CODEC = RecordCodecBuilder.create(instance -> instance.group(
-                BlockPos.CODEC.fieldOf("pos").forGetter(Entry::pos),
-                BlockState.CODEC.fieldOf("state").forGetter(Entry::state),
-                Codec.FLOAT.fieldOf("yaw").forGetter(Entry::yaw),
-                Codec.FLOAT.fieldOf("pitch").forGetter(Entry::pitch),
-                Codec.BOOL.fieldOf("billboard").forGetter(Entry::billboard),
-                // Optional: entries saved before the center existed have none (cell-centered).
-                Vec3.CODEC.optionalFieldOf("center", null).forGetter(Entry::center)
-        ).apply(instance, Entry::new));
-    }
+    private static final Codec<RotationData> ENTRY_CODEC = RecordCodecBuilder.create(i -> i.group(
+            BlockState.CODEC.fieldOf("state").forGetter(RotationData::state),
+            Codec.FLOAT.fieldOf("yaw").forGetter(RotationData::yaw),
+            Codec.FLOAT.fieldOf("pitch").forGetter(RotationData::pitch),
+            Codec.BOOL.fieldOf("billboard").forGetter(RotationData::billboard),
+            Vec3.CODEC.optionalFieldOf("center").forGetter(d -> Optional.ofNullable(d.center()))
+    ).apply(i, (state, yaw, pitch, billboard, center) ->
+            new RotationData(state, yaw, pitch, billboard, center.orElse(null))));
 
-    private static final Codec<RotationSavedData> CODEC = RecordCodecBuilder.create(instance -> instance.group(
-            Codec.list(Entry.CODEC).fieldOf("rotations").forGetter(RotationSavedData::entries)
-    ).apply(instance, RotationSavedData::fromEntries));
+    private static final Codec<Map.Entry<BlockPos, RotationData>> ENTRY_MAP_CODEC =
+            RecordCodecBuilder.create(i -> i.group(
+                    BlockPos.CODEC.fieldOf("pos").forGetter(Map.Entry::getKey),
+                    ENTRY_CODEC.fieldOf("data").forGetter(Map.Entry::getValue)
+            ).apply(i, (pos, data) -> Map.entry(pos, data)));
 
+    public static final Codec<RotationSavedData> CODEC = Codec.list(ENTRY_MAP_CODEC)
+            .xmap(entries -> {
+                Map<BlockPos, RotationData> map = new HashMap<>();
+                for (Map.Entry<BlockPos, RotationData> entry : entries) {
+                    map.put(entry.getKey(), entry.getValue());
+                }
+                return new RotationSavedData(map);
+            }, data -> data.rotations.entrySet().stream().toList());
+
+    // Vanilla 26.2 only exposes the full record constructor (NeoForge adds the 3-arg one).
     public static final SavedDataType<RotationSavedData> TYPE = new SavedDataType<>(
-            Identifier.fromNamespaceAndPath("buildertools", "rotations"),
-            RotationSavedData::new, CODEC, DataFixTypes.SAVED_DATA_MAP_DATA);
+            Identifier.parse("buildertools:rotations"), () -> new RotationSavedData(), CODEC, null);
 
-    private static List<Entry> entries(RotationSavedData data) {
-        List<Entry> list = new ArrayList<>();
-        for (Map.Entry<BlockPos, RotationData> e : data.map.entrySet()) {
-            list.add(new Entry(e.getKey(), e.getValue().state(), e.getValue().yaw(),
-                    e.getValue().pitch(), e.getValue().billboard(), e.getValue().center(e.getKey())));
-        }
-        return list;
+    private final Map<BlockPos, RotationData> rotations;
+
+    public RotationSavedData() {
+        this(new HashMap<>());
     }
 
-    private static RotationSavedData fromEntries(List<Entry> entries) {
-        RotationSavedData data = new RotationSavedData();
-        for (Entry e : entries) {
-            data.map.put(e.pos, new RotationData(e.state, e.yaw, e.pitch, e.billboard, e.center));
-        }
-        return data;
+    public RotationSavedData(Map<BlockPos, RotationData> rotations) {
+        this.rotations = rotations;
     }
 
     public static RotationSavedData of(ServerLevel level) {
         return level.getDataStorage().computeIfAbsent(TYPE);
     }
 
-    /** The rotated block in the cell, or null. */
     public RotationData get(BlockPos pos) {
-        return map.get(pos);
+        return this.rotations.get(pos);
     }
 
     public void set(BlockPos pos, RotationData data) {
-        map.put(pos.immutable(), data);
+        this.rotations.put(pos, data);
         setDirty();
     }
 
-    /** Removes the cell's entry; returns true when there was one. */
     public boolean remove(BlockPos pos) {
-        boolean removed = map.remove(pos.immutable()) != null;
-        if (removed) {
+        RotationData removed = this.rotations.remove(pos);
+        if (removed != null) {
             setDirty();
+            return true;
         }
-        return removed;
+        return false;
     }
 
-    /** A live view of the whole layer (server side). */
     public Map<BlockPos, RotationData> all() {
-        return map;
+        return this.rotations;
     }
 }
