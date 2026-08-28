@@ -33,6 +33,9 @@ public class BuilderToolsMod {
         io.github.favasur.smoothterrain.config.SmoothTerrainConfigImpl.register(container, modEventBus);
         io.github.favasur.smoothterrain.network.SmoothTerrainNetworkNeoForge.register(modEventBus);
 
+        // Register the smoothTerrain world rule (/gamerule smoothTerrain true|false).
+        net.buildertools.server.SmoothTerrainWorldRules.init();
+
         // Server-side safety net: keeps the tools from breaking/placing/interacting even if a
         // misbehaving client sends the vanilla packets anyway. Client cancels these first.
         NeoForge.EVENT_BUS.register(ServerEvents.class);

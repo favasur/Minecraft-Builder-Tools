@@ -110,14 +110,25 @@ public final class ServerEvents {
         }
     }
 
+    /** Reacts to {@code /gamerule smoothTerrain true|false} on the 26.2 world-rule system. */
+    @SubscribeEvent
+    public static void onGameRuleChanged(net.neoforged.neoforge.event.level.GameRuleChangedEvent event) {
+        if (SmoothTerrainWorldRules.SMOOTH_TERRAIN != null
+                && event.getGameRule() == SmoothTerrainWorldRules.SMOOTH_TERRAIN) {
+            Boolean enabled = (Boolean) event.getNewValue();
+            SmoothTerrainWorldRules.onGameruleChanged(event.getServer(), enabled);
+        }
+    }
+
     @SubscribeEvent
     public static void onPlayerLoggedIn(PlayerEvent.PlayerLoggedInEvent event) {
         if (event.getEntity() instanceof ServerPlayer serverPlayer) {
             // Send the rotation layer so every rotated block renders rotated on this client.
             RotationStore.syncAllTo(serverPlayer);
-            // Send the current Smooth Terrain world setting so this client matches the world.
+            // Send the current Smooth Terrain world settings so this client matches the world.
             serverPlayer.connection.send(new net.buildertools.network.packet.SmoothTerrainTogglePacket(
-                    io.github.favasur.smoothterrain.config.SmoothTerrainConfig.Server.collisionsEnabled));
+                    io.github.favasur.smoothterrain.config.SmoothTerrainConfig.Server.collisionsEnabled,
+                    SmoothTerrainWorldRules.smoothness()));
         }
     }
 

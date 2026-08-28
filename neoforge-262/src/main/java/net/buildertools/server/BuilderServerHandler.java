@@ -1042,7 +1042,8 @@ public final class BuilderServerHandler {
             // client (and the integrated/local server) and re-meshes the chunks.
             io.github.favasur.smoothterrain.config.SmoothTerrainConfigImpl.Server.setEnabled(smoothTerrain);
             net.buildertools.network.packet.SmoothTerrainTogglePacket packet =
-                    new net.buildertools.network.packet.SmoothTerrainTogglePacket(smoothTerrain);
+                    new net.buildertools.network.packet.SmoothTerrainTogglePacket(smoothTerrain,
+                            SmoothTerrainWorldRules.smoothness());
             for (ServerPlayer p : level.players()) {
                 p.connection.send(packet);
             }

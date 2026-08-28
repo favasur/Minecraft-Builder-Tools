@@ -13,7 +13,9 @@
     "BlockGetterMixin",
     "LevelMixin",
     "CollisionGetterMixin",
-    "MultiPlayerGameModeMixin"
+    "MultiPlayerGameModeMixin",
+    "GameRulesAccessor",
+    "GameRulesMixin"
   ],
   "injectors": {
     "defaultRequire": 1

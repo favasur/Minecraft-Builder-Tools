@@ -2,6 +2,7 @@ package net.buildertools.server;
 
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.exceptions.CommandSyntaxException;
+import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.builder.ArgumentBuilder;
@@ -16,6 +17,7 @@ import net.minecraft.commands.arguments.blocks.BlockStateArgument;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Vec3i;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
@@ -108,11 +110,21 @@ public final class BuilderCommand {
         dispatcher.register(Commands.literal("undo").executes(ctx -> undo(ctx)));
         dispatcher.register(Commands.literal("redo").executes(ctx -> redo(ctx)));
         dispatcher.register(Commands.literal("clear").executes(ctx -> clearSelection(ctx)));
+        dispatcher.register(Commands.literal("clearblocks").executes(ctx -> clearSelection(ctx)));
         dispatcher.register(Commands.literal("clearinventory").executes(ctx -> clearInventory(ctx)));
         dispatcher.register(Commands.literal("clearentities")
                 .executes(ctx -> clearEntities(ctx, -1))
                 .then(Commands.argument("radius", IntegerArgumentType.integer(1))
                         .executes(ctx -> clearEntities(ctx, IntegerArgumentType.getInteger(ctx, "radius")))));
+        dispatcher.register(Commands.literal("smoothterrain")
+                .requires(Commands.hasPermission(Commands.LEVEL_GAMEMASTERS))
+                .executes(ctx -> smoothTerrainToggle(ctx))
+                .then(Commands.literal("on").executes(ctx -> smoothTerrainSet(ctx, true)))
+                .then(Commands.literal("off").executes(ctx -> smoothTerrainSet(ctx, false)))
+                .then(Commands.argument("smoothness", FloatArgumentType.floatArg(0.0f, 1.0f))
+                        .executes(ctx -> smoothTerrainSmoothness(ctx)))
+                .then(Commands.literal("status")
+                        .executes(ctx -> smoothTerrainStatus(ctx))));
     }
 
     // ------------------------------------------------------------------
@@ -363,9 +375,10 @@ public final class BuilderCommand {
     }
 
     /**
-     * /clearentities - removes every entity inside the selected area; with a radius argument,
-     * every entity within that many blocks of the player instead. Players are never removed.
-     * Off-grid blocks are entities here too, so they are removed with their display child.
+     * /clearentities - removes every foreign entity inside the selected area; with a radius
+     * argument, every entity within that many blocks of the player instead. Players are never
+     * removed. Rotated / off-grid blocks of the mod are NOT entities for this purpose: they are
+     * blocks, so they are left alone (use /clear or /clearblocks to remove them).
      */
     private static int clearEntities(CommandContext<CommandSourceStack> ctx, int radius) throws CommandSyntaxException {
         ServerPlayer player = player(ctx);
@@ -389,19 +402,17 @@ public final class BuilderCommand {
             if (entity instanceof Player) {
                 continue;
             }
-            if (entity instanceof OffGridBlockEntity block) {
-                block.discardWithDisplay();
-            } else if (entity instanceof Display
-                    && entity.entityTags().contains(BuilderServerHandler.OFF_GRID_TAG)) {
-                // The solid counterpart removes the display; only orphan it if the solid itself is
-                // outside the box (e.g. solid removed earlier in this pass).
-                if (BuilderServerHandler.findOffGrid(level, entity.getX(), entity.getY(), entity.getZ()) == null) {
-                    entity.discard();
-                }
+            // The mod's off-grid/rotated blocks are represented by an OffGridBlockEntity plus a
+            // tagged Display child. Those are blocks, not entities - skip them so /clearentities
+            // does not wipe the build. Everything else gets removed.
+            if (entity instanceof OffGridBlockEntity) {
                 continue;
-            } else {
-                entity.discard();
             }
+            if (entity instanceof Display
+                    && entity.entityTags().contains(BuilderServerHandler.OFF_GRID_TAG)) {
+                continue;
+            }
+            entity.discard();
             count++;
         }
         message(player, "Removed " + count + " entit(ies) in the " + what + ".");
@@ -747,6 +758,55 @@ public final class BuilderCommand {
         applySelectionChange(player, min, max);
         message(player, "Shifted selection by " + amount + " block(s).");
         return 1;
+    }
+
+    // ------------------------------------------------------------------
+    // Smooth Terrain world rule (/smoothterrain and /gamerule smoothTerrain)
+    // ------------------------------------------------------------------
+
+    private static MinecraftServer server(CommandContext<CommandSourceStack> ctx) {
+        return ctx.getSource().getServer();
+    }
+
+    /** /smoothterrain - file-flips Smooth Terrain and reports the new state. */
+    private static int smoothTerrainToggle(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        ServerPlayer player = player(ctx);
+        SmoothTerrainWorldRules.setEnabled(server(ctx), !SmoothTerrainWorldRules.enabled());
+        message(player, "Smooth Terrain is now " + (SmoothTerrainWorldRules.enabled() ? "enabled" : "disabled")
+                + " (smoothness " + formatSmoothness(SmoothTerrainWorldRules.smoothness()) + ").");
+        return 1;
+    }
+
+    /** /smoothterrain on|off - enables or disables Smooth Terrain. */
+    private static int smoothTerrainSet(CommandContext<CommandSourceStack> ctx, boolean enabled) throws CommandSyntaxException {
+        ServerPlayer player = player(ctx);
+        SmoothTerrainWorldRules.setEnabled(server(ctx), enabled);
+        message(player, "Smooth Terrain is now " + (enabled ? "enabled" : "disabled")
+                + " (smoothness " + formatSmoothness(SmoothTerrainWorldRules.smoothness()) + ").");
+        return 1;
+    }
+
+    /** /smoothterrain <0-1> - changes the terrain smoothness (0.5 is the default middle). */
+    private static int smoothTerrainSmoothness(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        ServerPlayer player = player(ctx);
+        float smoothness = FloatArgumentType.getFloat(ctx, "smoothness");
+        SmoothTerrainWorldRules.setSmoothness(server(ctx), smoothness);
+        message(player, "Smooth Terrain smoothness set to " + formatSmoothness(smoothness)
+                + (SmoothTerrainWorldRules.enabled() ? "" : " (Smooth Terrain is currently disabled)."));
+        return 1;
+    }
+
+    /** /smoothterrain status - reports the current state without changing anything. */
+    private static int smoothTerrainStatus(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {
+        ServerPlayer player = player(ctx);
+        message(player, "Smooth Terrain is " + (SmoothTerrainWorldRules.enabled() ? "enabled" : "disabled")
+                + ", smoothness " + formatSmoothness(SmoothTerrainWorldRules.smoothness())
+                + " (0.5 is the default middle).");
+        return 1;
+    }
+
+    private static String formatSmoothness(float smoothness) {
+        return String.format(java.util.Locale.ROOT, "%.2f", smoothness);
     }
 
     private static int undo(CommandContext<CommandSourceStack> ctx) throws CommandSyntaxException {

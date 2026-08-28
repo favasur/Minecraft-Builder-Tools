@@ -13,7 +13,8 @@
     "LevelMixin",
     "CollisionGetterMixin",
     "MultiPlayerGameModeMixin",
-    "LevelRendererMixin"
+    "LevelRendererMixin",
+    "GameRulesMixin"
   ],
   "injectors": {
     "defaultRequire": 1

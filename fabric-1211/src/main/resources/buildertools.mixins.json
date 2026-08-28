@@ -15,7 +15,9 @@
     "BlockDisplayAccessor",
     "BlockGetterMixin",
     "CollisionGetterMixin",
-    "LevelMixin"
+    "LevelMixin",
+    "GameRulesAccessor",
+    "GameRulesBooleanValueAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

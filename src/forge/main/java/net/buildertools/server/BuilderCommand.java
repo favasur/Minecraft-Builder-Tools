@@ -109,6 +109,7 @@ public final class BuilderCommand {
         dispatcher.register(Commands.literal("undo").executes(ctx -> undo(ctx)));
         dispatcher.register(Commands.literal("redo").executes(ctx -> redo(ctx)));
         dispatcher.register(Commands.literal("clear").executes(ctx -> clearSelection(ctx)));
+        dispatcher.register(Commands.literal("clearblocks").executes(ctx -> clearSelection(ctx)));
         dispatcher.register(Commands.literal("clearinventory").executes(ctx -> clearInventory(ctx)));
         dispatcher.register(Commands.literal("clearentities")
                 .executes(ctx -> clearEntities(ctx, -1))
@@ -351,9 +352,10 @@ public final class BuilderCommand {
     }
 
     /**
-     * /clearentities - removes every entity inside the selected area; with a radius argument,
-     * every entity within that many blocks of the player instead. Players are never removed.
-     * Off-grid blocks are entities here too, so they are removed with their display child.
+     * /clearentities - removes every foreign entity inside the selected area; with a radius
+     * argument, every entity within that many blocks of the player instead. Players are never
+     * removed. Rotated / off-grid blocks of the mod are NOT entities for this purpose: they are
+     * blocks, so they are left alone (use /clear or /clearblocks to remove them).
      */
     private static int clearEntities(CommandContext<CommandSourceStack> ctx, int radius) throws CommandSyntaxException {
         ServerPlayer player = player(ctx);
@@ -377,19 +379,17 @@ public final class BuilderCommand {
             if (entity instanceof Player) {
                 continue;
             }
-            if (entity instanceof OffGridBlockEntity block) {
-                block.discardWithDisplay();
-            } else if (entity instanceof Display
-                    && entity.getTags().contains(BuilderServerHandler.OFF_GRID_TAG)) {
-                // The solid counterpart removes the display; only orphan it if the solid itself is
-                // outside the box (e.g. solid removed earlier in this pass).
-                if (BuilderServerHandler.findOffGrid(level, entity.getX(), entity.getY(), entity.getZ()) == null) {
-                    entity.discard();
-                }
+            // The mod's off-grid/rotated blocks are represented by an OffGridBlockEntity plus a
+            // tagged Display child. Those are blocks, not entities - skip them so /clearentities
+            // does not wipe the build. Everything else gets removed.
+            if (entity instanceof OffGridBlockEntity) {
                 continue;
-            } else {
-                entity.discard();
             }
+            if (entity instanceof Display
+                    && entity.getTags().contains(BuilderServerHandler.OFF_GRID_TAG)) {
+                continue;
+            }
+            entity.discard();
             count++;
         }
         message(player, "Removed " + count + " entit(ies) in the " + what + ".");

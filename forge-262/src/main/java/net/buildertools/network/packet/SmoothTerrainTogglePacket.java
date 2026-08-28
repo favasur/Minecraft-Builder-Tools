@@ -9,22 +9,24 @@ import net.minecraftforge.event.network.CustomPayloadEvent.Context;
 import static net.buildertools.BuilderToolsMod.MODID;
 
 /**
- * Server -> Client: the Smooth Terrain world setting changed. The client applies it to the bundled
- * Smooth Terrain config (visuals + collisions) and re-meshes every chunk.
+ * Server -> Client: the Smooth Terrain world settings changed (enabled flag and/or terrain
+ * smoothness). The client applies them to the bundled Smooth Terrain config (visuals +
+ * collisions) and re-meshes every chunk.
  */
-public record SmoothTerrainTogglePacket(boolean enabled) implements CustomPacketPayload {
+public record SmoothTerrainTogglePacket(boolean enabled, float smoothness) implements CustomPacketPayload {
     public static final Type<SmoothTerrainTogglePacket> TYPE =
             new Type<>(Identifier.fromNamespaceAndPath(MODID, "smooth_terrain_toggle"));
 
     public static final StreamCodec<FriendlyByteBuf, SmoothTerrainTogglePacket> STREAM_CODEC = new StreamCodec<>() {
         @Override
         public SmoothTerrainTogglePacket decode(FriendlyByteBuf buf) {
-            return new SmoothTerrainTogglePacket(buf.readBoolean());
+            return new SmoothTerrainTogglePacket(buf.readBoolean(), buf.readFloat());
         }
 
         @Override
         public void encode(FriendlyByteBuf buf, SmoothTerrainTogglePacket packet) {
             buf.writeBoolean(packet.enabled());
+            buf.writeFloat(packet.smoothness());
         }
     };
 
@@ -34,7 +36,9 @@ public record SmoothTerrainTogglePacket(boolean enabled) implements CustomPacket
     }
 
     public static void handle(SmoothTerrainTogglePacket payload, Context context) {
-        context.enqueueWork(() ->
-                io.github.favasur.smoothterrain.config.SmoothTerrainConfigImpl.Server.setEnabled(payload.enabled()));
+        context.enqueueWork(() -> {
+            io.github.favasur.smoothterrain.config.SmoothTerrainConfigImpl.Server.setEnabled(payload.enabled());
+            io.github.favasur.smoothterrain.config.SmoothTerrainConfigImpl.Server.setSmoothness(payload.smoothness());
+        });
     }
 }
