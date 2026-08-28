@@ -7,12 +7,16 @@ full entity manipulation, plus a WorldEdit-style command set that applies to the
 
 | Module | Minecraft | Loader | Jar |
 |---|---|---|---|
-| root (`src/`) | 1.21.1 | NeoForge 21.1.x | `build/libs/buildertools-0.1.4.jar` |
-| `root (-Ploader=forge)` | 1.21.1 | Forge | `build/libs/buildertools-forge-1.21.1-0.1.4.jar` |
-| `fabric-1211` | 1.21.1 | Fabric | `fabric-1211/build/libs/buildertools-fabric-1.21.1-0.1.4.jar` |
-| `neoforge-262` | 26.2 | NeoForge | `neoforge-262/build/libs/buildertools-neoforge-26.2-0.1.4.jar` |
-| `forge-262` | 26.2 | Forge | `forge-262/build/libs/buildertools-forge-26.2-0.1.4.jar` |
-| `fabric-262` | 26.2 | Fabric | `fabric-262/build/libs/buildertools-fabric-26.2-0.1.4.jar` |
+| root (`src/`) | 1.21.1 | NeoForge 21.1.x | `dist/buildertools-neoforge-1.21.1-0.2.0.jar` |
+| `root (-Ploader=forge)` | 1.21.1 | Forge | `dist/buildertools-forge-1.21.1-0.2.0.jar` |
+| `fabric-1211` | 1.21.1 | Fabric | `dist/buildertools-fabric-1.21.1-0.2.0.jar` |
+| `neoforge-262` | 26.2 | NeoForge | `dist/buildertools-neoforge-26.2-0.2.0.jar` |
+| `forge-262` | 26.2 | Forge | `dist/buildertools-forge-26.2-0.2.0.jar` |
+| `fabric-262` | 26.2 | Fabric | `dist/buildertools-fabric-26.2-0.2.0.jar` |
+
+Every module's `collectJars` task copies the built jar into `dist/` with the name above. Release
+notes for each version live in [CHANGELOG.md](CHANGELOG.md); the 0.2.0 jars are also attached to
+the [GitHub release](https://github.com/favasur/Minecraft-Builder-Tools/releases/tag/0.2.0).
 
 Each loader × version pair shares the same gameplay logic (selection, commands, undo, clipboard,
 entity tools, brushes, creative settings, renderers) — only the loader-specific event, packet and
