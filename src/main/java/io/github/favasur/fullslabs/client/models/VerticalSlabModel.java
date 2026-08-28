@@ -1,6 +1,7 @@
 package io.github.favasur.fullslabs.client.models;
 
 import io.github.favasur.fullslabs.block.SlabVertical;
+import java.util.ArrayList;
 import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
@@ -25,13 +26,17 @@ import org.joml.Vector3f;
  * onto the slab's edge. Because the source model is the block's real baked model, this works for
  * every slab in the game - vanilla or modded - with no resource files and no per-slab registry
  * entries.
+ *
+ * <p>Each emitted quad's cull face is derived from its own transformed geometry (the same
+ * calculate-facing rule the block baker uses), never from the parent's cull-face buckets alone.
+ * That matters because vanilla slab models bake the top face WITHOUT a cullface - it lives in the
+ * un-culled batch - so a lookup of "parent faces culled to up" finds nothing and the vertical
+ * slab face that corresponds to the parent's top face used to come out empty (the invisible
+ * face). Re-deriving directions from geometry puts every one of the slab's six faces into its
+ * proper cull bucket and never emits a null-direction quad.
  */
 public final class VerticalSlabModel implements BakedModel {
     private static final Logger LOG = LogManager.getLogger("FullSlabs");
-    /** One-shot diagnostic: dumps the parent model's quad counts per cull face on first render so
-     *  we can see where the slab's top-face geometry actually lives (the "west big face missing"
-     *  bug traces to the parent yielding no UP culled quads). */
-    private static boolean parentBakeLogged;
     /** Vertex stride of the BLOCK vertex format (position, color, uv0, uv2, normal). */
     private static final int VERTEX_STRIDE = 8;
 
@@ -43,6 +48,9 @@ public final class VerticalSlabModel implements BakedModel {
     private final Map<Direction, Direction> forward;
     /** Requested cull face -> parent cull face (inverse rotation). */
     private final Map<Direction, Direction> inverse;
+    /** One-shot diagnostic: log the parent's quad counts per bucket on first render. */
+    private boolean parentBakeLogged;
+    private long lastDebugLog;
 
     public VerticalSlabModel(BakedModel parent, Direction occupied) {
         this.parent = parent;
@@ -52,23 +60,26 @@ public final class VerticalSlabModel implements BakedModel {
         switch (occupied) {
             case NORTH -> {
                 this.rotation.rotationX(-(float) Math.PI / 2.0F);
-                translation.set(0.0F, 0.0F, 8.0F);
+                translation.set(0.0F, 0.0F, 0.5F);
             }
             case SOUTH -> {
                 this.rotation.rotationX((float) Math.PI / 2.0F);
-                translation.set(0.0F, 16.0F, 8.0F);
+                translation.set(0.0F, 1.0F, 0.5F);
             }
             case WEST -> {
                 this.rotation.rotationZ((float) Math.PI / 2.0F);
-                translation.set(8.0F, 0.0F, 0.0F);
+                translation.set(0.5F, 0.0F, 0.0F);
             }
             case EAST -> {
                 this.rotation.rotationZ(-(float) Math.PI / 2.0F);
-                translation.set(8.0F, 16.0F, 0.0F);
+                translation.set(0.5F, 1.0F, 0.0F);
             }
             default -> throw new IllegalArgumentException("Invalid vertical direction " + occupied);
         }
-        // M = T * R so that p' = R(p) + t
+        // M = T * R so that p' = R(p) + t. The baked quad positions are block-local 0..1
+        // units (the layer renderer and RotatedBlockModel rotate around 0.5), so the
+        // half-block translations are 0.5/1.0, NOT 8/16: using 8/16 placed the slab about
+        // eight blocks away from its cell and made every vertical slab invisible.
         this.transform = new Matrix4f().translate(translation).rotate(this.rotation);
         this.forward = directionMap(this.rotation);
         this.inverse = directionMap(this.rotation.conjugate(new Quaternionf()));
@@ -94,26 +105,40 @@ public final class VerticalSlabModel implements BakedModel {
 
     @Override
     public List<BakedQuad> getQuads(BlockState state, Direction side, RandomSource random) {
-        Direction parentSide = side == null ? null : this.inverse.get(side);
-        List<BakedQuad> out = this.parent.getQuads(SlabVertical.flat(state), parentSide, random)
-                .stream().map(this::transformQuad).toList();
+        BlockState flat = SlabVertical.flat(state);
+        List<BakedQuad> out = new ArrayList<>();
+        // Quads whose parent cull face rotates onto this slab face (forward rotation).
+        if (side != null) {
+            Direction parentSide = this.inverse.get(side);
+            for (BakedQuad quad : this.parent.getQuads(flat, parentSide, random)) {
+                out.add(transformQuad(quad));
+            }
+        }
+        // The parent's un-culled batch: vanilla slab models bake the top face without a cullface,
+        // so the inverse lookup above finds nothing for the slab face that corresponds to the
+        // parent's top. After the 90-degree rotation that face is a real side face - re-cull it
+        // from the transformed geometry and emit it into the right bucket, otherwise that
+        // vertical-slab face silently disappears (the "invisible texture" bug).
+        for (BakedQuad quad : this.parent.getQuads(flat, null, random)) {
+            BakedQuad transformed = transformQuad(quad);
+            if (deriveDirection(transformed.getVertices()) == side) {
+                out.add(transformed);
+            }
+        }
         if (LOG.isDebugEnabled()) {
-            // "No visible textures" symptom: if a cull face maps to a parent face that yields no
-            // quads here, that face is silently missing - log the mapping and quad count.
-            LOG.debug("Vertical slab {}: cullFace={} -> parentCull={} produced {} quads",
-                    this.occupied, side, parentSide, out.size());
-            // One-shot diagnosis of WHERE the parent's geometry lives: dump every cull face's
-            // quad count for the flat parent state. This reveals whether the missing big-west
-            // face (parent UP, from inverse of WEST) has its quads under null, under a side face,
-            // or is genuinely absent.
-            if (parentBakeLogged == false) {
-                parentBakeLogged = true;
-                for (Direction d : Direction.values()) {
-                    LOG.debug("Vertical-slab parent bake: flat={} cull={} quads={}",
-                            SlabVertical.flat(state), d, this.parent.getQuads(SlabVertical.flat(state), d, random).size());
+            long now = System.currentTimeMillis();
+            if (now - this.lastDebugLog > 1000L) {
+                this.lastDebugLog = now;
+                LOG.debug("Vertical slab {}: cullFace={} produced {} quads", this.occupied, side, out.size());
+                if (!this.parentBakeLogged) {
+                    this.parentBakeLogged = true;
+                    for (Direction d : Direction.values()) {
+                        LOG.debug("Vertical-slab parent bake: flat={} cull={} quads={}",
+                                flat, d, this.parent.getQuads(flat, d, random).size());
+                    }
+                    LOG.debug("Vertical-slab parent bake: flat={} cull=null quads={}",
+                            flat, this.parent.getQuads(flat, null, random).size());
                 }
-                LOG.debug("Vertical-slab parent bake: flat={} cull=null quads={}",
-                        SlabVertical.flat(state), this.parent.getQuads(SlabVertical.flat(state), null, random).size());
             }
         }
         return out;
@@ -138,8 +163,48 @@ public final class VerticalSlabModel implements BakedModel {
             Vector3f normal = new Vector3f(nx, ny, nz).rotate(this.rotation);
             vertices[base + 7] = packNormal(normal);
         }
-        Direction direction = quad.getDirection() == null ? null : this.forward.get(quad.getDirection());
+        // Derive the cull face from the transformed geometry instead of trusting the parent's
+        // bucket metadata, so un-culled parent quads (the vanilla slab's top face) get a real
+        // direction here.
+        Direction direction = deriveDirection(vertices);
         return new BakedQuad(vertices, quad.getTintIndex(), direction, quad.getSprite(), quad.isShade());
+    }
+
+    /**
+     * The cull face of a quad derived from its vertex positions - the same rule the block baker
+     * uses ({@code FaceBakery#calculateFacing}): normal = (v2 - v1) x (v0 - v1), then the
+     * direction with the strongest positive dot product. Rotations preserve winding, so the
+     * transformed quad yields the correct outward face.
+     */
+    private static Direction deriveDirection(int[] vertices) {
+        float x0 = Float.intBitsToFloat(vertices[0]);
+        float y0 = Float.intBitsToFloat(vertices[1]);
+        float z0 = Float.intBitsToFloat(vertices[2]);
+        float x1 = Float.intBitsToFloat(vertices[8]);
+        float y1 = Float.intBitsToFloat(vertices[9]);
+        float z1 = Float.intBitsToFloat(vertices[10]);
+        float x2 = Float.intBitsToFloat(vertices[16]);
+        float y2 = Float.intBitsToFloat(vertices[17]);
+        float z2 = Float.intBitsToFloat(vertices[18]);
+        float ax = x0 - x1, ay = y0 - y1, az = z0 - z1;
+        float bx = x2 - x1, by = y2 - y1, bz = z2 - z1;
+        float nx = by * az - bz * ay;
+        float ny = bz * ax - bx * az;
+        float nz = bx * ay - by * ax;
+        float len = (float) Math.sqrt((double) nx * nx + (double) ny * ny + (double) nz * nz);
+        if (!Float.isFinite(nx) || !Float.isFinite(ny) || !Float.isFinite(nz) || len < 1.0E-6F) {
+            return Direction.UP;
+        }
+        Direction best = Direction.UP;
+        float bestDot = -1.0F;
+        for (Direction direction : Direction.values()) {
+            float dot = (nx * direction.getStepX() + ny * direction.getStepY() + nz * direction.getStepZ()) / len;
+            if (dot > bestDot) {
+                bestDot = dot;
+                best = direction;
+            }
+        }
+        return best;
     }
 
     private static int packNormal(Vector3f normal) {

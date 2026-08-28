@@ -6,7 +6,10 @@ import com.mojang.blaze3d.vertex.VertexConsumer;
 import io.github.favasur.fullslabs.block.SlabVertical;
 import io.github.favasur.fullslabs.config.Config;
 import io.github.favasur.fullslabs.config.Controls;
+import io.github.favasur.fullslabs.util.RotatedSlabPlacement;
 import io.github.favasur.fullslabs.util.SlabPlacement;
+import org.joml.Quaternionf;
+import org.joml.Vector3f;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -24,6 +27,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.item.BlockItem;
 import net.minecraft.world.level.BlockAndTintGetter;
 import net.minecraft.world.level.BlockGetter;
 import net.minecraft.world.level.block.SlabBlock;
@@ -82,7 +86,86 @@ public final class BlockFaceOverlay {
         Direction face = bhr.getDirection();
         Vec3 hit = bhr.getLocation();
         BlockState state = world.getBlockState(pos);
+        // A Builder Tools rotated block in the cell: the region highlight must follow the block's
+        // ACTUAL rotated face (the axis-aligned cell face no longer matches its geometry).
+        RotatedBlockLookup lookup = RotatedBlockLookup.get();
+        RotatedBlockLookup.Target rotated = lookup != null ? lookup.at(world, pos) : null;
+        if (rotated != null) {
+            BlockFaceOverlay.renderRotatedFaceOverlay(player, camera.getPosition(), rotated, hit);
+            return;
+        }
         BlockFaceOverlay.renderFaceOverlay(player, camera.getPosition(), world, pos, state, face, hit);
+    }
+
+    /**
+     * Region highlight on the actual rotated face of a Builder Tools rotated block under the
+     * cursor. The click is resolved in the block's LOCAL frame (same math the placement path
+     * uses), the region polygon is clipped in local UV space, and the whole face is drawn through
+     * the block's world rotation so the highlight lies exactly on the visible face.
+     */
+    private static void renderRotatedFaceOverlay(Player player, Vec3 camera, RotatedBlockLookup.Target rotated, Vec3 hit) {
+        SlabPlacement.Mode mode = Controls.getPlacementMode(player.getUUID());
+        Quaternionf rotation = RotatedSlabPlacement.rotation(rotated.yaw(), rotated.pitch());
+        RotatedSlabPlacement.LocalClick click = RotatedSlabPlacement.localClick(
+                rotation, rotated.shapeBounds(), rotated.center(), hit, player.getDirection());
+        FaceRegion region = BlockFaceOverlay.getRegion(
+                mode, click.face(), click.localFacing(), BlockPos.ZERO, click.localHit());
+        // Same-material merge (mirrors the vanilla vertical-slab rule): clicking the inner face
+        // of a rotated vertical slab fills the block - highlight the whole face instead of a
+        // single region.
+        if (player.getMainHandItem().getItem() instanceof BlockItem held
+                && held.getBlock() == rotated.state().getBlock()
+                && SlabVertical.isVertical(rotated.state())
+                && SlabVertical.isInsideSlab(rotated.state(), BlockPos.ZERO, click.localHit())) {
+            region = null;
+        }
+        // The world frame of the clicked local face.
+        FaceFrame local = FaceFrame.create(click.face());
+        Vec3 n = BlockFaceOverlay.rotate(local.n(), rotation);
+        // The slab lands half a block off the face plane; the pose origin sits one unit behind
+        // the landing-box center so the frame's +N/2 bias lands exactly on the face plane.
+        RotatedSlabPlacement.Result result = RotatedSlabPlacement.place(
+                mode, rotation, rotated.shapeBounds(), rotated.center(), hit, player.getDirection());
+        Vec3 origin = result.boxCenter().subtract(n.x, n.y, n.z);
+        RectUV rect = BlockFaceOverlay.faceRectOnBox(click.face(),
+                rotated.shapeBounds().minX, rotated.shapeBounds().minY, rotated.shapeBounds().minZ,
+                rotated.shapeBounds().maxX, rotated.shapeBounds().maxY, rotated.shapeBounds().maxZ,
+                click.localHit().x, click.localHit().y, click.localHit().z);
+        if (rect == null || rect.isDegenerate()) {
+            return;
+        }
+        List<Vec2> poly = BlockFaceOverlay.rectToCenteredPolygon(rect);
+        poly = BlockFaceOverlay.clipPolygonByAt(mode, poly, click.face(), region);
+        if (poly.size() < 3) {
+            return;
+        }
+        FaceFrame world = new FaceFrame(click.face(),
+                BlockFaceOverlay.rotate(local.u(), rotation),
+                BlockFaceOverlay.rotate(local.v(), rotation), n);
+        LinkedHashMap<RenderType, ByteBufferBuilder> map = new LinkedHashMap<RenderType, ByteBufferBuilder>();
+        map.put(Layers.QUAD_LAYER, new ByteBufferBuilder(1024));
+        map.put(Layers.LINE_LAYER, new ByteBufferBuilder(512));
+        MultiBufferSource.BufferSource immediate = MultiBufferSource.immediateWithBuffers(map, new ByteBufferBuilder(1024));
+        PoseStack stack = new PoseStack();
+        stack.pushPose();
+        stack.translate(origin.x - camera.x, origin.y - camera.y, origin.z - camera.z);
+        PoseStack.Pose entry = stack.last();
+        BlockFaceOverlay.emitFill(entry, immediate, world, poly);
+        immediate.endBatch();
+        HashMap<EdgeKey, UVSeg> edgeMap = new HashMap<EdgeKey, UVSeg>();
+        for (int i = 0; i < poly.size(); ++i) {
+            Vec2 a = poly.get(i);
+            Vec2 b = poly.get((i + 1) % poly.size());
+            BlockFaceOverlay.addEdgeQuantized(edgeMap, a, b);
+        }
+        BlockFaceOverlay.drawLines(entry, immediate, world, edgeMap);
+        stack.popPose();
+    }
+
+    /** Rotates a world-space axis vector by the block rotation. */
+    private static Vec3 rotate(Vec3 v, Quaternionf rotation) {
+        Vector3f out = rotation.transform(new Vector3f((float) v.x, (float) v.y, (float) v.z), new Vector3f());
+        return new Vec3(out.x, out.y, out.z);
     }
 
     private static void renderFaceOverlay(Player player, Vec3 camera, BlockAndTintGetter world, BlockPos pos, BlockState state, Direction face, Vec3 hit) {

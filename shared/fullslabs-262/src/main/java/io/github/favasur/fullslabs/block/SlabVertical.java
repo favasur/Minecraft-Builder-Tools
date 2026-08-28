@@ -101,6 +101,37 @@ public final class SlabVertical {
         return state.setValue(VERTICAL, true).setValue(DIRECTION, Direction.WEST);
     }
 
+    /**
+     * Applies a placement direction to a slab state: UP/DOWN produce the horizontal top/bottom
+     * slab, any horizontal direction stands the slab vertically occupying that half. Used by the
+     * rotated-block placement path, where the direction arrives from the client's region math
+     * ({@code RotatedSlabPlacement}) instead of a vanilla click.
+     */
+    public static BlockState applyDirection(BlockState state, Direction direction) {
+        if (!(state.getBlock() instanceof SlabBlock) || !state.hasProperty(VERTICAL)) {
+            return state;
+        }
+        return switch (direction) {
+            case UP -> state.setValue(VERTICAL, false).setValue(BlockStateProperties.SLAB_TYPE, SlabType.TOP);
+            case DOWN -> state.setValue(VERTICAL, false).setValue(BlockStateProperties.SLAB_TYPE, SlabType.BOTTOM);
+            default -> state.setValue(VERTICAL, true).setValue(DIRECTION, direction);
+        };
+    }
+
+    /**
+     * The full double-slab state: the slab filling the whole block. Used by the rotated-block
+     * merge (clicking the inner face of a same-material rotated vertical slab fills the block,
+     * mirroring the vanilla vertical-slab rule). Non-slab states are returned unchanged.
+     */
+    public static BlockState doubleSlab(BlockState state) {
+        if (!(state.getBlock() instanceof SlabBlock) || !state.hasProperty(VERTICAL)) {
+            return state;
+        }
+        return state.setValue(VERTICAL, false)
+                .setValue(BlockStateProperties.SLAB_TYPE, SlabType.DOUBLE)
+                .setValue(BlockStateProperties.WATERLOGGED, false);
+    }
+
     /** The horizontal, bottom, non-waterlogged state used as the model source for vertical states. */
     public static BlockState flat(BlockState state) {
         return state.setValue(VERTICAL, false)

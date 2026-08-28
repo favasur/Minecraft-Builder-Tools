@@ -52,6 +52,8 @@ public final class SlabVertical {
     private SlabVertical() {
     }
 
+    private static boolean codeSourceLogged;
+
     public static boolean isVertical(BlockState state) {
         return state.getOptionalValue(VERTICAL).orElse(false);
     }
@@ -91,12 +93,43 @@ public final class SlabVertical {
         return s;
     }
 
-    /** The slab standing vertically, defaulting to the WEST half. */
+    /** The slab standing vertically, defaulting to the WEST half (used by Builder Tools' rotated blocks). */
     public static BlockState vertical(BlockState state) {
         if (!(state.getBlock() instanceof SlabBlock) || !state.hasProperty(VERTICAL)) {
             return state;
         }
         return state.setValue(VERTICAL, true).setValue(DIRECTION, Direction.WEST);
+    }
+
+    /**
+     * Applies a placement direction to a slab state: UP/DOWN produce the horizontal top/bottom
+     * slab, any horizontal direction stands the slab vertically occupying that half. Used by the
+     * rotated-block placement path, where the direction arrives from the client's region math
+     * ({@code RotatedSlabPlacement}) instead of a vanilla click.
+     */
+    public static BlockState applyDirection(BlockState state, Direction direction) {
+        if (!(state.getBlock() instanceof SlabBlock) || !state.hasProperty(VERTICAL)) {
+            return state;
+        }
+        return switch (direction) {
+            case UP -> state.setValue(VERTICAL, false).setValue(BlockStateProperties.SLAB_TYPE, SlabType.TOP);
+            case DOWN -> state.setValue(VERTICAL, false).setValue(BlockStateProperties.SLAB_TYPE, SlabType.BOTTOM);
+            default -> state.setValue(VERTICAL, true).setValue(DIRECTION, direction);
+        };
+    }
+
+    /**
+     * The full double-slab state: the slab filling the whole block. Used by the rotated-block
+     * merge (clicking the inner face of a same-material rotated vertical slab fills the block,
+     * mirroring the vanilla vertical-slab rule). Non-slab states are returned unchanged.
+     */
+    public static BlockState doubleSlab(BlockState state) {
+        if (!(state.getBlock() instanceof SlabBlock) || !state.hasProperty(VERTICAL)) {
+            return state;
+        }
+        return state.setValue(VERTICAL, false)
+                .setValue(BlockStateProperties.SLAB_TYPE, SlabType.DOUBLE)
+                .setValue(BlockStateProperties.WATERLOGGED, false);
     }
 
     /** The horizontal, bottom, non-waterlogged state used as the model source for vertical states. */
@@ -151,6 +184,23 @@ public final class SlabVertical {
             // resulting state for every click so a wrong "right-sided vertical slab" is visible.
             LOG.debug("getTargetedState slab={} blockFace={} target={} -> {}",
                     slab, blockFace, target, result);
+            // One-shot identity probe: the running class sometimes disagrees with the source, so
+            // record WHERE this class file came from and a content hash to compare against the
+            // build output (rules stale jars / build caches in or out).
+            if (!codeSourceLogged) {
+                codeSourceLogged = true;
+                String hash = "?";
+                try (java.io.InputStream in = SlabVertical.class.getResourceAsStream(
+                        "/io/github/favasur/fullslabs/block/SlabVertical.class")) {
+                    if (in != null) {
+                        byte[] bytes = in.readAllBytes();
+                        hash = Integer.toHexString(java.util.Arrays.hashCode(bytes)) + "(" + bytes.length + ")";
+                    }
+                } catch (Exception ignored) {
+                }
+                LOG.debug("getTargetedState CLASS source={} hash={}",
+                        SlabVertical.class.getProtectionDomain().getCodeSource(), hash);
+            }
         }
         return result;
     }

@@ -11,6 +11,7 @@ import net.buildertools.network.packet.SelectionSyncPacket;
 import net.buildertools.registry.ModSounds;
 import net.minecraft.commands.arguments.blocks.BlockStateParser;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.Direction;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
@@ -487,7 +488,8 @@ public final class BuilderServerHandler {
      */
     public static void handleBlockRotation(ServerPlayer player, BlockPos cell,
                                            double cx, double cy, double cz,
-                                           float yaw, float pitch, boolean billboard) {
+                                           float yaw, float pitch, boolean billboard,
+                                           Direction slabDirection, boolean mergeDouble) {
         if (player.distanceToSqr(cx, cy, cz) > MAX_DISTANCE * MAX_DISTANCE) {
             sendError(player, "Position is too far away.");
             return;
@@ -499,10 +501,21 @@ public final class BuilderServerHandler {
         }
         RotationData existing = RotationStore.get(level, cell);
         if (existing != null) {
-            // Re-rotate the block already in the layer, strictly in place: its state AND its
-            // exact model center stay, only the angles change.
+            // Re-rotate the block already in the layer, strictly in place: its exact model
+            // center stays and only the angles change. R-rotating a slab (slabDirection null)
+            // keeps its occupied half fixed; a click whose landing box resolves back onto the
+            // same cell (e.g. a diagonal-rotated neighbor) carries a direction and re-places the
+            // slab into that half (slab-aware re-rotation) - non-slab states are untouched.
             Vec3 c = existing.center(cell);
-            RotationStore.set(level, cell, new RotationData(existing.state(), yaw, pitch, billboard, c));
+            BlockState state = existing.state();
+            if (mergeDouble) {
+                // Same-material inner-face click: fill the block - the rotated slab becomes a
+                // full double slab in place (its exact model center and angles stay).
+                state = io.github.favasur.fullslabs.block.SlabVertical.doubleSlab(state);
+            } else if (slabDirection != null) {
+                state = io.github.favasur.fullslabs.block.SlabVertical.applyDirection(state, slabDirection);
+            }
+            RotationStore.set(level, cell, new RotationData(state, yaw, pitch, billboard, c));
             recordOffGridPlacement(player, cell);
             sendDebug(player, "Rotated block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
                     + (billboard ? ", billboard" : "") + ").");
@@ -515,9 +528,14 @@ public final class BuilderServerHandler {
             sendError(player, "Hold a block in your main hand to place.");
             return;
         }
-        BlockState state = io.github.favasur.fullslabs.block.SlabVertical.vertical(
-                blockItem.getBlock().defaultBlockState());
+        BlockState state = blockItem.getBlock().defaultBlockState();
+        state = slabDirection != null
+                ? io.github.favasur.fullslabs.block.SlabVertical.applyDirection(state, slabDirection)
+                : io.github.favasur.fullslabs.block.SlabVertical.vertical(state);
         VoxelShape shape = state.getCollisionShape(level, BlockPos.ZERO);
+        if (shape.isEmpty()) {
+            shape = Shapes.block(); // blocks without a collision shape (torch, rail, ...) act as a full cell
+        }
         if (player.getBoundingBox().intersects(OffGridTransform.boxAround(cx, cy, cz, yaw, pitch, shape.bounds()))) {
             sendError(player, "You're in the way - move back first.");
             return;
@@ -525,6 +543,12 @@ public final class BuilderServerHandler {
         // The new rotated model may not penetrate any OTHER rotated block (layer or legacy
         // entity) - touching flush along a rotated face is fine, cutting through is not.
         if (penetratesRotatedBlock(level, cell, cx, cy, cz, yaw, pitch, shape)) {
+            if (LOGGER.isDebugEnabled()) {
+                AABB box = OffGridTransform.boxAround(cx, cy, cz, yaw, pitch, shape.bounds());
+                LOGGER.debug("[Builder] {}: REJECTED cut-through cell={} state={} center=({},{},{}) yaw={} box=({},{},{})-({},{},{})",
+                        player.getScoreboardName(), cell, state, cx, cy, cz, yaw, pitch,
+                        box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ);
+            }
             sendError(player, "That would cut through another rotated block.");
             return;
         }
@@ -638,7 +662,7 @@ public final class BuilderServerHandler {
             playSound(player, ModSounds.SET_CORNER_1.get());
             return;
         }
-        handleBlockRotation(player, BlockPos.containing(cx, cy, cz), cx, cy, cz, yaw, pitch, billboard);
+        handleBlockRotation(player, BlockPos.containing(cx, cy, cz), cx, cy, cz, yaw, pitch, billboard, null, false);
     }
 
     /** Spawns a legacy off-grid entity pair (display + collidable entity) for old worlds. */

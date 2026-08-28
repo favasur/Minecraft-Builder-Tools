@@ -3,6 +3,7 @@ package io.github.favasur.fullslabs.client;
 import io.github.favasur.fullslabs.block.SlabVertical;
 import io.github.favasur.fullslabs.config.Config;
 import io.github.favasur.fullslabs.config.Controls;
+import io.github.favasur.fullslabs.util.RotatedSlabPlacement;
 import io.github.favasur.fullslabs.util.SlabPlacement;
 import net.minecraft.client.Camera;
 import net.minecraft.client.Minecraft;
@@ -17,7 +18,9 @@ import net.minecraft.world.level.block.state.properties.BlockStateProperties;
 import net.minecraft.world.level.block.state.properties.SlabType;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.world.phys.Vec3;
 import org.joml.Matrix4f;
+import org.joml.Quaternionf;
 import org.joml.Vector2f;
 import org.joml.Vector3f;
 import org.joml.Vector4f;
@@ -64,8 +67,11 @@ public final class PlacementOverlay {
             return;
         }
         BlockPos pos = hit.getBlockPos();
-        AABB volume = targetVolume(mc, slab, mc.level.getBlockState(pos), pos, hit);
-        if (volume == null) {
+        // A rotated block under the cursor places a rotated slab against its face; the volume is
+        // an oriented box, not a world-aligned AABB.
+        Oriented oriented = rotatedVolume(mc, slab, pos, hit);
+        AABB volume = oriented == null ? targetVolume(mc, slab, mc.level.getBlockState(pos), pos, hit) : null;
+        if (oriented == null && volume == null) {
             return;
         }
         float minX = Float.MAX_VALUE;
@@ -73,10 +79,23 @@ public final class PlacementOverlay {
         float maxX = -Float.MAX_VALUE;
         float maxY = -Float.MAX_VALUE;
         for (int i = 0; i < 8; i++) {
-            Vector2f p = project(draw, mc,
-                    (i & 1) == 0 ? volume.minX : volume.maxX,
-                    (i & 2) == 0 ? volume.minY : volume.maxY,
-                    (i & 4) == 0 ? volume.minZ : volume.maxZ);
+            Vector2f p;
+            if (oriented != null) {
+                double lx = (i & 1) == 0 ? oriented.localBounds().minX : oriented.localBounds().maxX;
+                double ly = (i & 2) == 0 ? oriented.localBounds().minY : oriented.localBounds().maxY;
+                double lz = (i & 4) == 0 ? oriented.localBounds().minZ : oriented.localBounds().maxZ;
+                Vector3f corner = oriented.rotation().transform(new Vector3f(
+                        (float) (lx - 0.5), (float) (ly - 0.5), (float) (lz - 0.5)), new Vector3f());
+                p = project(draw, mc,
+                        oriented.center().x + corner.x,
+                        oriented.center().y + corner.y,
+                        oriented.center().z + corner.z);
+            } else {
+                p = project(draw, mc,
+                        (i & 1) == 0 ? volume.minX : volume.maxX,
+                        (i & 2) == 0 ? volume.minY : volume.maxY,
+                        (i & 4) == 0 ? volume.minZ : volume.maxZ);
+            }
             if (p == null) {
                 return; // part of the volume is behind the camera
             }
@@ -123,6 +142,58 @@ public final class PlacementOverlay {
             return new AABB(pos);
         }
         return placedVolume(mc, slab, clicked, pos, hit);
+    }
+
+    /**
+     * The oriented volume of a slab placed against a Builder Tools rotated block: the landing box
+     * (rotated with the block, centered half a block off the clicked face) clipped to the placed
+     * slab's shape. Null when nothing is under the cursor or the landing cell is blocked.
+     */
+    private static Oriented rotatedVolume(Minecraft mc, SlabBlock slab, BlockPos pos, BlockHitResult hit) {
+        RotatedBlockLookup lookup = RotatedBlockLookup.get();
+        if (lookup == null) {
+            return null;
+        }
+        RotatedBlockLookup.Target target = lookup.at(mc.level, pos);
+        if (target == null) {
+            return null;
+        }
+        Quaternionf rotation = RotatedSlabPlacement.rotation(target.yaw(), target.pitch());
+        // Same-material merge (mirrors the vanilla vertical-slab rule): clicking the inner face
+        // of a rotated vertical slab fills the block - preview the full double slab in place at
+        // the block's own center.
+        RotatedSlabPlacement.LocalClick click = RotatedSlabPlacement.localClick(
+                rotation, target.shapeBounds(), target.center(), hit.getLocation(), mc.player.getDirection());
+        if (target.state().getBlock() == slab
+                && SlabVertical.isVertical(target.state())
+                && SlabVertical.isInsideSlab(target.state(), BlockPos.ZERO, click.localHit())) {
+            return new Oriented(target.center(), rotation, new AABB(0.0, 0.0, 0.0, 1.0, 1.0, 1.0));
+        }
+        RotatedSlabPlacement.Result result = RotatedSlabPlacement.place(
+                Controls.getPlacementMode(mc.player.getUUID()), rotation, target.shapeBounds(),
+                target.center(), hit.getLocation(), mc.player.getDirection());
+        BlockPos landing = BlockPos.containing(result.boxCenter());
+        // The click path re-places in place when the landing box rounds back into the clicked
+        // block's own cell (diagonal rotations), but refuses cells occupied by OTHER rotated
+        // blocks - mirror that so the preview never shows a placement the click would reject.
+        if (RotatedBlockLookup.get() != null
+                && !landing.equals(pos)
+                && RotatedBlockLookup.get().at(mc.level, landing) != null) {
+            return null;
+        }
+        if (!mc.level.getBlockState(landing).canBeReplaced()) {
+            return null;
+        }
+        BlockState state = SlabVertical.applyDirection(slab.defaultBlockState(), result.target());
+        AABB local = state.getCollisionShape(mc.level, BlockPos.containing(result.boxCenter())).bounds();
+        if (local == null || local.getSize() < 1.0E-4) {
+            return null;
+        }
+        return new Oriented(result.boxCenter(), rotation, local);
+    }
+
+    /** An oriented box: world center, rotation and local 0..1 shape bounds. */
+    private record Oriented(Vec3 center, Quaternionf rotation, AABB localBounds) {
     }
 
     private static AABB placedVolume(Minecraft mc, SlabBlock slab, BlockState clicked, BlockPos pos, BlockHitResult hit) {

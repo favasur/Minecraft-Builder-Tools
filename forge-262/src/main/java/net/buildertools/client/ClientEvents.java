@@ -37,6 +37,8 @@ import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.Level;
 import net.minecraft.core.Direction;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
@@ -52,6 +54,11 @@ import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.shapes.VoxelShape;
+import io.github.favasur.fullslabs.block.SlabVertical;
+import io.github.favasur.fullslabs.client.RotatedBlockLookup;
+import io.github.favasur.fullslabs.config.Controls;
+import io.github.favasur.fullslabs.util.RotatedSlabPlacement;
+import net.minecraft.world.level.block.SlabBlock;
 
 import java.util.List;
 
@@ -70,11 +77,25 @@ import org.lwjgl.glfw.GLFW;
 
 @OnlyIn(Dist.CLIENT)
 public final class ClientEvents {
+    private static final Logger LOG = LogManager.getLogger("BuilderTools");
     private ClientEvents() {
     }
 
     public static void initializeGeometry() {
         RotatedCollisionProvider.setProvider(RotatedBlockTriangles::triangles);
+        // The slab placement overlay asks for the rotated block under the cursor through this
+        // bridge; back it with the mod's rotation layer so slab placement previews work on
+        // rotated blocks (and the click path resolves the same target the overlay draws).
+        RotatedBlockLookup.set((level, pos) -> {
+            RotationData rot = RotationStore.get(level, pos);
+            if (rot == null) {
+                return null;
+            }
+            VoxelShape collision = rot.state().getCollisionShape(level, pos);
+            AABB bounds = collision.isEmpty()
+                    ? AABB.unitCubeFromLowerCorner(Vec3.ZERO) : collision.bounds();
+            return new RotatedBlockLookup.Target(rot.center(pos), rot.yaw(), rot.pitch(), rot.billboard(), bounds, rot.state());
+        });
     }
 
     // ------------------------------------------------------------------
@@ -182,25 +203,32 @@ public final class ClientEvents {
                     // an off-grid block still behaves normally.
                     OffGridHit ogHit = raycastOffGridHit(player, 6.0);
                     if (ogHit != null && ogHit.isBlock()) {
-                        // Rotated LAYER block: place the next block FLUSH against the clicked
-                        // rotated face, one unit along the neighbor's OWN rotated axis (the ray
-                        // transformed into its local frame tells which face was clicked), and
-                        // inherit its rotation - clicking the same face again keeps building the
-                        // continuous rotated plane (PlaceAnywhere-style), not an XYZ staircase.
-                        float[] rot = rotationOfBlock(player.level(), ogHit.cell());
-                        Vec3 neighborCenter = centerOfBlock(player.level(), ogHit.cell());
-                        if (rot != null) {
-                            Vec3 offset = OffGridTransform.rotatedGridOffset(
-                                    OffGridTransform.rotation(rot[0], rot[1]), neighborCenter,
-                                    stateBoundsOfBlock(player.level(), ogHit.cell()),
-                                    player.getEyePosition(1.0f), player.getLookAngle());
-                            if (offset != null) {
-                                Vec3 newCenter = neighborCenter.add(offset);
-                                BlockPos newCell = BlockPos.containing(newCenter);
-                                if (canPlaceRotatedGridBlock(player, newCell, newCenter, rot[0], rot[1])) {
-                                    cancelled = true;
-                                    sendBlockRotation(newCell, newCenter, rot[0], rot[1], rot[2] == 1.0f);
-                                    player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                        // Rotated LAYER block: a slab click computes the region-based placement
+                        // (CENTER stands a vertical slab flat against the face, edges become fin
+                        // or horizontal slabs); anything else places the next block FLUSH against
+                        // the clicked rotated face, one unit along the neighbor's OWN rotated axis
+                        // (the ray transformed into its local frame tells which face was clicked),
+                        // inheriting its rotation - clicking the same face again keeps building
+                        // the continuous rotated plane (PlaceAnywhere-style).
+                        if (tryRotatedSlabPlacement(player, ogHit)) {
+                            cancelled = true;
+                            player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                        } else {
+                            float[] rot = rotationOfBlock(player.level(), ogHit.cell());
+                            Vec3 neighborCenter = centerOfBlock(player.level(), ogHit.cell());
+                            if (rot != null) {
+                                Vec3 offset = OffGridTransform.rotatedGridOffset(
+                                        OffGridTransform.rotation(rot[0], rot[1]), neighborCenter,
+                                        stateBoundsOfBlock(player.level(), ogHit.cell()),
+                                        player.getEyePosition(1.0f), player.getLookAngle());
+                                if (offset != null) {
+                                    Vec3 newCenter = neighborCenter.add(offset);
+                                    BlockPos newCell = BlockPos.containing(newCenter);
+                                    if (canPlaceRotatedGridBlock(player, newCell, newCenter, rot[0], rot[1], null)) {
+                                        cancelled = true;
+                                        sendBlockRotation(newCell, newCenter, rot[0], rot[1], rot[2] == 1.0f);
+                                        player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                                    }
                                 }
                             }
                         }
@@ -448,20 +476,25 @@ public final class ClientEvents {
                 OffGridHit hit = raycastOffGridHit(player, 6.0);
                 if (hit != null) {
                     if (hit.isBlock()) {
-                        float[] rot = rotationOfBlock(player.level(), hit.cell());
-                        Vec3 neighborCenter = centerOfBlock(player.level(), hit.cell());
-                        if (rot != null) {
-                            Vec3 offset = OffGridTransform.rotatedGridOffset(
-                                    OffGridTransform.rotation(rot[0], rot[1]), neighborCenter,
-                                    stateBoundsOfBlock(player.level(), hit.cell()),
-                                    player.getEyePosition(1.0f), player.getLookAngle());
-                            if (offset != null) {
-                                Vec3 newCenter = neighborCenter.add(offset);
-                                BlockPos newCell = BlockPos.containing(newCenter);
-                                if (canPlaceRotatedGridBlock(player, newCell, newCenter, rot[0], rot[1])) {
-                                    cancelled = true;
-                                    sendBlockRotation(newCell, newCenter, rot[0], rot[1], rot[2] == 1.0f);
-                                    player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                        if (tryRotatedSlabPlacement(player, hit)) {
+                            cancelled = true;
+                            player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                        } else {
+                            float[] rot = rotationOfBlock(player.level(), hit.cell());
+                            Vec3 neighborCenter = centerOfBlock(player.level(), hit.cell());
+                            if (rot != null) {
+                                Vec3 offset = OffGridTransform.rotatedGridOffset(
+                                        OffGridTransform.rotation(rot[0], rot[1]), neighborCenter,
+                                        stateBoundsOfBlock(player.level(), hit.cell()),
+                                        player.getEyePosition(1.0f), player.getLookAngle());
+                                if (offset != null) {
+                                    Vec3 newCenter = neighborCenter.add(offset);
+                                    BlockPos newCell = BlockPos.containing(newCenter);
+                                    if (canPlaceRotatedGridBlock(player, newCell, newCenter, rot[0], rot[1], null)) {
+                                        cancelled = true;
+                                        sendBlockRotation(newCell, newCenter, rot[0], rot[1], rot[2] == 1.0f);
+                                        player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                                    }
                                 }
                             }
                         }
@@ -992,20 +1025,128 @@ public final class ClientEvents {
     /** The cell-local collision-shape bounds (0..1) of the rotated block in the cell. */
     private static AABB stateBoundsOfBlock(Level level, BlockPos pos) {
         RotationData rot = RotationStore.get(level, pos);
-        return rot != null ? rot.state().getCollisionShape(level, pos).bounds()
-                : level.getBlockState(pos).getCollisionShape(level, pos).bounds();
+        VoxelShape collision = rot != null
+                ? rot.state().getCollisionShape(level, pos)
+                : level.getBlockState(pos).getCollisionShape(level, pos);
+        return collision.isEmpty() ? AABB.unitCubeFromLowerCorner(Vec3.ZERO) : collision.bounds();
     }
 
     /** Sends a rotated-block placement carrying the exact world-space model center. */
     private static void sendBlockRotation(BlockPos cell, Vec3 center, float yaw, float pitch, boolean billboard) {
+        sendBlockRotation(cell, center, yaw, pitch, billboard, null, false);
+    }
+
+    /** Sends a rotated-block placement; a non-null {@code slabDirection} stands the slab into
+     *  that half (see {@link SlabVertical#applyDirection}). */
+    private static void sendBlockRotation(BlockPos cell, Vec3 center, float yaw, float pitch, boolean billboard,
+                                          Direction slabDirection) {
+        sendBlockRotation(cell, center, yaw, pitch, billboard, slabDirection, false);
+    }
+
+    /** Sends a rotated-block placement; {@code mergeDouble} converts the rotated slab already in
+     *  the cell into a full double slab in place (same-material inner-face merge). */
+    private static void sendBlockRotation(BlockPos cell, Vec3 center, float yaw, float pitch, boolean billboard,
+                                          Direction slabDirection, boolean mergeDouble) {
         ClientPackets.sendToServer(new BlockRotationPacket(
-                cell, center.x, center.y, center.z, yaw, pitch, billboard));
+                cell, center.x, center.y, center.z, yaw, pitch, billboard, slabDirection, mergeDouble));
+    }
+
+    /**
+     * Slab placement against a rotated block (layer entry): computes the region-based target the
+     * same way the placement overlay does ({@code RotatedSlabPlacement}) - CENTER of a side face
+     * stands a vertical slab flat against the face, LEFT/RIGHT edges place fin slabs along the
+     * face tangent, TOP/BOTTOM edges lay horizontal slabs flush against the face - and sends the
+     * packet with the slab direction so the server stands the slab into the matching half. The
+     * slab inherits the neighbor's rotation. Returns true when the click was handled (the caller
+     * cancels the vanilla event); false falls through to the flush full-block placement.
+     */
+    private static boolean tryRotatedSlabPlacement(Player player, OffGridHit hit) {
+        if (!hit.isBlock()) {
+            return false;
+        }
+        ItemStack held = player.getMainHandItem();
+        if (!(held.getItem() instanceof BlockItem blockItem) || !(blockItem.getBlock() instanceof SlabBlock)) {
+            return false;
+        }
+        if (!blockItem.getBlock().defaultBlockState().hasProperty(SlabVertical.VERTICAL)) {
+            return false; // a slab without the FullSlabs vertical graft keeps the block path
+        }
+        float[] rot = rotationOfBlock(player.level(), hit.cell());
+        if (rot == null) {
+            return false;
+        }
+        Vec3 neighborCenter = centerOfBlock(player.level(), hit.cell());
+        AABB neighborBounds = stateBoundsOfBlock(player.level(), hit.cell());
+        RotatedSlabPlacement.LocalClick click = RotatedSlabPlacement.localClick(
+                RotatedSlabPlacement.rotation(rot[0], rot[1]), neighborBounds, neighborCenter,
+                hit.hitPoint(), player.getDirection());
+        // Same-material merge (mirrors the vanilla vertical-slab rule): clicking the inner face
+        // region of a rotated vertical slab fills the block - convert it to a full double slab
+        // in place, keeping its exact model center and rotation.
+        BlockState clickedState = representedStateOf(player.level(), hit.cell());
+        boolean merge = clickedState.getBlock() == blockItem.getBlock()
+                && SlabVertical.isVertical(clickedState)
+                && SlabVertical.isInsideSlab(clickedState, BlockPos.ZERO, click.localHit());
+        LOG.debug("Rotated slab click cell={} clicked={} held={} localHit=({},{},{}) merge={}",
+                hit.cell(), clickedState, held.getItem(),
+                click.localHit().x, click.localHit().y, click.localHit().z, merge);
+        if (merge) {
+            sendBlockRotation(hit.cell(), neighborCenter, rot[0], rot[1], rot[2] == 1.0f, null, true);
+            return true;
+        }
+        RotatedSlabPlacement.Result result = RotatedSlabPlacement.place(
+                Controls.getPlacementMode(player.getUUID()),
+                RotatedSlabPlacement.rotation(rot[0], rot[1]),
+                neighborBounds, neighborCenter, hit.hitPoint(), player.getDirection());
+        LOG.debug("Rotated slab place cell={} target={} boxCenter=({},{},{})",
+                hit.cell(), result.target(),
+                result.boxCenter().x, result.boxCenter().y, result.boxCenter().z);
+        BlockPos newCell = BlockPos.containing(result.boxCenter());
+        // A diagonal-rotated neighbor's landing box can round back into the block's OWN cell:
+        // the server then re-places it in place (slab-aware re-rotation - the clicked region's
+        // direction updates the slab's half, its center and angles stay).
+        if (newCell.equals(hit.cell())) {
+            sendBlockRotation(hit.cell(), result.boxCenter(), rot[0], rot[1], rot[2] == 1.0f, result.target());
+            return true;
+        }
+        // The landing cell must otherwise be free. When it already holds the SAME slab block,
+        // the click re-places it in place: the region direction updates its half (center and
+        // angles stay) - clicking a filled side re-orients the slab instead of refusing. Any
+        // OTHER rotated block in the way is a hard refusal (the new slab would overlap it).
+        RotationData landing = RotationStore.get(player.level(), newCell);
+        if (landing != null) {
+            BlockState landingState = landing.state();
+            if (landingState.getBlock() == blockItem.getBlock()) {
+                LOG.debug("Rotated slab re-place cell={} target={} (same slab in landing cell)",
+                        newCell, result.target());
+                Vec3 landingCenter = landing.center(newCell);
+                sendBlockRotation(newCell, landingCenter, rot[0], rot[1], rot[2] == 1.0f, result.target());
+                return true;
+            }
+            LOG.debug("Rotated slab REFUSED cell={} target={} occupied by {}",
+                    hit.cell(), result.target(), landingState);
+            player.sendOverlayMessage(Component.literal(
+                    "[Builder] That cell is occupied by another rotated block - the slab would overlap it."));
+            return true;
+        }
+        if (!canPlaceRotatedGridBlock(player, newCell, result.boxCenter(), rot[0], rot[1], result.target())) {
+            LOG.debug("Rotated slab REFUSED cell={} target={} boxCenter=({},{},{}) non-replaceable",
+                    hit.cell(), result.target(),
+                    result.boxCenter().x, result.boxCenter().y, result.boxCenter().z);
+            player.sendOverlayMessage(Component.literal(
+                    "[Builder] That cell is occupied - the slab would overlap another block."));
+            return true;
+        }
+        sendBlockRotation(newCell, result.boxCenter(), rot[0], rot[1], rot[2] == 1.0f, result.target());
+        return true;
     }
 
     /** Whether a rotated block centered at {@code center} (cell {@code cell}) can be placed: the
-     *  cell must be free and replaceable and the player must not stand inside the model. */
+     *  cell must be free and replaceable and the player must not stand inside the model. When
+     *  {@code slabDirection} is non-null the held slab's shape is evaluated with that half (so a
+     *  vertical fin or a horizontal top/bottom slab checks its real, thinner footprint). */
     private static boolean canPlaceRotatedGridBlock(Player player, BlockPos cell, Vec3 center,
-                                                    float yaw, float pitch) {
+                                                    float yaw, float pitch, Direction slabDirection) {
         if (RotationStore.hasRotation(player.level(), cell)) {
             return false; // already occupied by a rotated block
         }
@@ -1018,7 +1159,9 @@ public final class ClientEvents {
             return false;
         }
         BlockState state = blockItem.getBlock().defaultBlockState();
-        state = net.buildertools.util.FullSlabsCompat.normalize(state);
+        state = slabDirection != null
+                ? SlabVertical.applyDirection(state, slabDirection)
+                : net.buildertools.util.FullSlabsCompat.normalize(state);
         AABB shape = state.getCollisionShape(player.level(), BlockPos.ZERO).bounds();
         AABB footprint = OffGridTransform.boxAround(center.x, center.y, center.z, yaw, pitch, shape);
         return !player.getBoundingBox().intersects(footprint);
@@ -1172,7 +1315,8 @@ public final class ClientEvents {
         org.joml.Vector3f d = inv.transform(new org.joml.Vector3f(
                 (float) dir.x, (float) dir.y, (float) dir.z), new org.joml.Vector3f());
         Minecraft minecraft = Minecraft.getInstance();
-        AABB shape = block.getRepresentedState().getCollisionShape(minecraft.level, BlockPos.ZERO).bounds();
+        VoxelShape collision = block.getRepresentedState().getCollisionShape(minecraft.level, BlockPos.ZERO);
+        AABB shape = collision.isEmpty() ? AABB.unitCubeFromLowerCorner(Vec3.ZERO) : collision.bounds();
         double minX = shape.minX - 0.5, maxX = shape.maxX - 0.5;
         double minY = shape.minY - 0.5, maxY = shape.maxY - 0.5;
         double minZ = shape.minZ - 0.5, maxZ = shape.maxZ - 0.5;
@@ -1245,7 +1389,8 @@ public final class ClientEvents {
                 (float) worldNormal.x, (float) worldNormal.y, (float) worldNormal.z),
                 new org.joml.Vector3f());
         Minecraft minecraft = Minecraft.getInstance();
-        AABB shape = block.getRepresentedState().getCollisionShape(minecraft.level, BlockPos.ZERO).bounds();
+        VoxelShape collision = block.getRepresentedState().getCollisionShape(minecraft.level, BlockPos.ZERO);
+        AABB shape = collision.isEmpty() ? AABB.unitCubeFromLowerCorner(Vec3.ZERO) : collision.bounds();
         float ax = Math.abs(local.x), ay = Math.abs(local.y), az = Math.abs(local.z);
         double thickness;
         if (ax >= ay && ax >= az) {
