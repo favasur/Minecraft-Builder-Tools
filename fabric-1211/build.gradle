@@ -25,12 +25,30 @@ sourceSets {
         // mixin graft (SlabVertical/SlabBlockMixin + the vanilla-only VerticalSlabModel), so only
         // the two loader-neutral bootstrap files come from shared/fullslabs-1211.
         java.srcDir('../src/main/java/io/github/favasur')
-        java.exclude 'smoothterrain/client/**'
-        java.exclude 'smoothterrain/hooks/ClientHooks.java'
-        java.exclude 'smoothterrain/hooks/Hooks.java'
-        java.exclude 'smoothterrain/network/**'
+        // Fabric supplies its own KeyMappings (no NeoForge network layer), the two Video Settings
+        // widgets and EntityMixin + the two client mixins in the same canonical package. The rest
+        // of the canonical client tree (mesh renderer, hooks, render mixins, conditional plugin)
+        // is now included so smooth terrain rendering matches NeoForge 1.21.1.
+        java.exclude 'smoothterrain/client/KeyMappings.java'
+        java.exclude 'smoothterrain/client/SmoothTerrainRoughnessSlider.java'
+        java.exclude 'smoothterrain/client/SmoothTerrainToggleButton.java'
+        // The module supplies its own VanillaRenderer (vanilla SectionCompiler entry point instead
+        // of the NeoForge AddSectionGeometryEvent) and its own Color struct copy.
+        java.exclude 'smoothterrain/client/render/VanillaRenderer.java'
+        java.exclude 'smoothterrain/client/render/struct/Color.java'
+        // The two NeoForge-specific network files are excluded; the module supplies a Fabric
+        // S2CUpdateServerConfig (in-memory server config serialization) and the payloads are
+        // registered by SmoothTerrainNetworkFabric.
+        java.exclude 'smoothterrain/network/SmoothTerrainNetworkNeoForge.java'
+        java.exclude 'smoothterrain/network/S2CUpdateServerConfig.java'
         java.exclude 'smoothterrain/neoforge/**'
-        java.exclude 'smoothterrain/mixin/**'
+        java.exclude 'smoothterrain/mixin/EntityMixin.java'
+        java.exclude 'smoothterrain/mixin/client/ScreenEffectRendererMixin.java'
+        java.exclude 'smoothterrain/mixin/client/VideoSettingsScreenMixin.java'
+        // The module supplies its own RenderChunkRebuildTaskMixin targeting vanilla's 4-arg
+        // SectionCompiler.compile (the canonical one targets NeoForge's 5-arg variant).
+        java.exclude 'smoothterrain/mixin/client/RenderChunkRebuildTaskMixin.java'
+        java.exclude 'smoothterrain/compat/**'
         java.exclude 'smoothterrain/compat/**'
         java.exclude 'smoothterrain/config/neoforge/**'
         java.exclude 'smoothterrain/config/SmoothTerrainConfigImpl.java'

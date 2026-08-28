@@ -264,7 +264,7 @@ public final class OldSmoothTerrain extends SimpleMesher {
 			if (Math.abs(dx) > maxRoughnessDelta || Math.abs(dy) > maxRoughnessDelta || Math.abs(dz) > maxRoughnessDelta) {
 				maxRoughnessDelta = Math.max(maxRoughnessDelta, Math.max(Math.abs(dx), Math.max(Math.abs(dy), Math.abs(dz))));
 			}
-			long now = net.minecraft.Util.getMillis();
+			long now = System.currentTimeMillis();
 			if (now - lastRoughnessLog > 1000L) {
 				lastRoughnessLog = now;
 				LOG.debug("Roughness active: raw={} clampedUsed={} worst |delta| applied so far={} at world=({},{},{})",

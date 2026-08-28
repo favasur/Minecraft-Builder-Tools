@@ -165,7 +165,10 @@ public final class ApiCompat {
 			return;
 		}
 		checked = true;
-		sectionCompilerCompileV1 = hasMethod("net.minecraft.client.renderer.chunk.SectionCompiler", "compile", 5);
+		// 1.21.1 vanilla (Fabric) has the 4-arg compile; NeoForge patches in a 5-arg variant with
+		// the additional-renderers list. The render mixins target whichever exists.
+		sectionCompilerCompileV1 = hasMethod("net.minecraft.client.renderer.chunk.SectionCompiler", "compile", 4)
+			|| hasMethod("net.minecraft.client.renderer.chunk.SectionCompiler", "compile", 5);
 		renderChunkRegion = classExists("net.minecraft.client.renderer.chunk.RenderChunkRegion");
 		modelBakerImplCtor = hasCtor("net.minecraft.client.resources.model.ModelBakery$ModelBakerImpl", 3);
 		blockEntityTypeCtorV1 = hasCtor("net.minecraft.world.level.block.entity.BlockEntityType", 3);

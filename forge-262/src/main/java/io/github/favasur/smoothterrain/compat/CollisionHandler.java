@@ -4,7 +4,6 @@ import io.github.favasur.smoothterrain.SmoothTerrain;
 import io.github.favasur.smoothterrain.config.SmoothTerrainConfig;
 import io.github.favasur.smoothterrain.hooks.trait.ISmoothTerrainBlockType;
 import io.github.favasur.smoothterrain.mesh.Mesher;
-import io.github.favasur.smoothterrain.mixin.client.ScreenEffectRendererMixin;
 import io.github.favasur.smoothterrain.util.Area;
 import io.github.favasur.smoothterrain.util.Face;
 import io.github.favasur.smoothterrain.util.ModUtil;

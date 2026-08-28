@@ -40,5 +40,6 @@ public final class SmoothTerrainConfigImpl {
      * next mesh build and there is nothing to invalidate here yet.
      */
     public static void refreshRendering() {
+        io.github.favasur.smoothterrain.client.RenderHelper.reloadAllChunks("smooth terrain rendering refreshed");
     }
 }

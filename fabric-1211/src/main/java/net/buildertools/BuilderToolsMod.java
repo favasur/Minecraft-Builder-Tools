@@ -46,6 +46,7 @@ public final class BuilderToolsMod implements ModInitializer {
         // Bundled Smooth Terrain meshing (Surface Nets): config, packets and client hooks.
         io.github.favasur.smoothterrain.config.SmoothTerrainConfigImpl.register(new ModContainer(), MOD_EVENT_BUS);
         FabricNetwork.register();
+        io.github.favasur.smoothterrain.fabric.SmoothTerrainNetworkFabric.register();
 
         // Server-side safety net: keeps the tools from breaking/placing/interacting even if a
         // misbehaving client sends the vanilla packets anyway. Client cancels these first.

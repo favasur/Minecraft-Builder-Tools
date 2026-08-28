@@ -4,10 +4,17 @@
   "package": "io.github.favasur.smoothterrain.compat",
   "compatibilityLevel": "JAVA_25",
   "mixins": [
-    "EntityMixin"
+    "EntityMixin",
+    "BlockMixin",
+    "BlockStateBaseMixin",
+    "BlockCollisionsMixin",
+    "LevelMixin",
+    "PlayerMixin"
   ],
   "client": [
-    "VideoSettingsScreenMixin"
+    "ScreenEffectRendererMixin",
+    "VideoSettingsScreenMixin",
+    "SectionCompilerMixin"
   ],
   "injectors": {
     "defaultRequire": 1

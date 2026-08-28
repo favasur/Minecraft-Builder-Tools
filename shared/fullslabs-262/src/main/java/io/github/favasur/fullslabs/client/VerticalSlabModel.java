@@ -135,7 +135,7 @@ public final class VerticalSlabModel implements BlockStateModel {
                 out = this.parent.getQuads(parentDirection).stream().map(this.model::transformQuad).toList();
             }
             if (LOG.isDebugEnabled()) {
-                long now = net.minecraft.Util.getMillis();
+                long now = System.currentTimeMillis();
                 if (now - this.lastQuadLog > 1000L) {
                     this.lastQuadLog = now;
                     // "No visible textures" symptom: faces come out empty when a mapped parent

@@ -436,7 +436,7 @@ public final class MeshCollisionShape extends VoxelShape {
 			// A horizontal collision consumed part of the motion - the very event that triggers the
 			// vanilla auto-step. Log (throttled) the axis, how much motion survived, and the size of
 			// the candidate step-height set, to correlate the stutter with step-up behaviour.
-			long now = net.minecraft.Util.getMillis();
+			long now = System.currentTimeMillis();
 			if (now - lastStepDebugLog > 500L) {
 				lastStepDebugLog = now;
 				LOG.debug("Slope hit axis={} survived={} of {} (blocked ~{}) yCoords={}",
@@ -446,7 +446,7 @@ public final class MeshCollisionShape extends VoxelShape {
 		if (yCandidateSeen && best >= 1.0D) {
 			// Falling down through a window with terrain triangles in it but NO collision contact: the
 			// collision floor under the player is incomplete (a gap / displaced-vertex hole).
-			long now = net.minecraft.Util.getMillis();
+			long now = System.currentTimeMillis();
 			if (now - lastStepDebugLog > 500L) {
 				lastStepDebugLog = now;
 				LOG.debug("POSSIBLE FALL-THROUGH: falling Y with {} triangles in range but no contact (box={}, motion={})",
@@ -478,7 +478,7 @@ public final class MeshCollisionShape extends VoxelShape {
 		if (axis == Direction.Axis.Y) {
 			// The surface heights (sorted) - consumed by the vanilla auto-step to pick how far to
 			// lift the entity when walking into a slope.
-			long now = net.minecraft.Util.getMillis();
+			long now = System.currentTimeMillis();
 			if (now - lastStepDebugLog > 500L) {
 				lastStepDebugLog = now;
 				if (LOG.isDebugEnabled()) {
