@@ -1,5 +1,6 @@
 package io.github.favasur.smoothterrain.mesh;
 
+import io.github.favasur.smoothterrain.config.SmoothTerrainConfig;
 import io.github.favasur.smoothterrain.mesh.TestData.TestMesh;
 import io.github.favasur.smoothterrain.util.*;
 import net.minecraft.core.BlockPos;
@@ -36,7 +37,10 @@ abstract class SDFMesher implements Mesher {
 
 	@Override
 	public String cacheId() {
-		return Mesher.super.cacheId() + (smoothness2x ? ":2x" : "");
+		// The roughness setting affects the generated vertex positions (see SurfaceNets), so it
+		// must be part of the mesh-cache identity or changing the Terrain Smoothness slider would
+		// keep serving the stale meshes from before the change.
+		return Mesher.super.cacheId() + (smoothness2x ? ":2x" : "") + ":r" + SmoothTerrainConfig.Server.oldSmoothTerrainRoughness;
 	}
 
 	protected static BlockPos getDimensions(Area area, boolean smoother, @Nullable TestMesh testMesh) {

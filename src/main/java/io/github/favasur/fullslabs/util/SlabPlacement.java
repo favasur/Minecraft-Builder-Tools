@@ -77,23 +77,29 @@ public class SlabPlacement {
         float posV = position.y;
         float offH = Math.abs(posH - 0.5f);
         float offV = Math.abs(posV - 0.5f);
-        if ((double)offH > 0.25 || (double)offV > 0.25) {
-            if (face.getAxis().isVertical()) {
-                if (offH > offV) {
-                    return posH < 0.5f ? facing.getCounterClockWise() : facing.getClockWise();
-                }
+        if (face.getAxis().isVertical()) {
+            // Horizontal face: the near/far strip (toward/away from the player) wins, so the slab
+            // hugs the edge facing the player; left/right only in the middle band; the center
+            // places a plain horizontal slab.
+            if (offV > 0.25) {
                 if (face == Direction.DOWN) {
                     return posV > 0.5f ? facing.getOpposite() : facing;
                 }
                 return posV < 0.5f ? facing.getOpposite() : facing;
             }
+            if (offH > 0.25) {
+                return posH < 0.5f ? facing.getCounterClockWise() : facing.getClockWise();
+            }
+            return face == Direction.DOWN ? Direction.UP : Direction.DOWN;
+        }
+        // Vertical face: unchanged edge regions (left/right first, then top/bottom); the center
+        // keeps the "face" target so the overlay still shows the central region, and
+        // SlabVertical#getTargetedState turns that into a plain horizontal slab.
+        if ((double)offH > 0.25 || (double)offV > 0.25) {
             if (offH > offV) {
                 return posH < 0.5f ? face.getClockWise() : face.getCounterClockWise();
             }
             return posV < 0.5f ? Direction.DOWN : Direction.UP;
-        }
-        if (face.getAxis().isVertical()) {
-            return face.getOpposite();
         }
         return face;
     }
@@ -109,11 +115,30 @@ public class SlabPlacement {
     }
 
     private static Direction getTargetedDirectionVertical(Direction face, Direction facing, Vec2 position) {
+        float posH = position.x;
+        float posV = position.y;
+        float offH = Math.abs(posH - 0.5f);
+        float offV = Math.abs(posV - 0.5f);
         if (face.getAxis().isVertical()) {
-            Direction direction = position.x < 0.5f ? face.getClockWise(facing.getAxis()) : face.getCounterClockWise(facing.getAxis());
-            return facing.getAxisDirection() == Direction.AxisDirection.POSITIVE ? direction : direction.getOpposite();
+            // Same player-relative edges as hybrid mode: near/far strip first, then left/right in
+            // the middle band, then the center, which places a plain horizontal slab.
+            if (offV > 0.25) {
+                if (face == Direction.DOWN) {
+                    return posV > 0.5f ? facing.getOpposite() : facing;
+                }
+                return posV < 0.5f ? facing.getOpposite() : facing;
+            }
+            if (offH > 0.25) {
+                return posH < 0.5f ? facing.getCounterClockWise() : facing.getClockWise();
+            }
+            return face == Direction.DOWN ? Direction.UP : Direction.DOWN;
         }
-        return position.x < 0.5f ? face.getClockWise() : face.getCounterClockWise();
+        // Vertical face: vertical slabs hugging the clicked side on the edges; the center keeps
+        // the "face" target so SlabVertical#getTargetedState places a plain horizontal slab.
+        if (offH > 0.25 || offV > 0.25) {
+            return position.x < 0.5f ? face.getClockWise() : face.getCounterClockWise();
+        }
+        return face;
     }
 
     public static enum Mode implements EnumPayload<Mode>

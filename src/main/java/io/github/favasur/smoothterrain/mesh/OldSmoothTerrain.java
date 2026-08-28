@@ -10,6 +10,8 @@ import io.github.favasur.smoothterrain.util.Vec;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.LiquidBlock;
 import net.minecraft.world.level.block.state.BlockState;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 import java.util.function.Predicate;
 
@@ -19,6 +21,24 @@ import java.util.function.Predicate;
  * @author Click_Me
  */
 public final class OldSmoothTerrain extends SimpleMesher {
+
+	private static final Logger LOG = LogManager.getLogger("SmoothTerrain");
+	/** For throttled logging of the worst per-vertex displacement the roughness setting applied. */
+	private static long lastRoughnessLog = 0L;
+	private static float maxRoughnessDelta = 0F;
+
+	/**
+	 * Safety ceiling on the per-vertex displacement the roughness setting may apply. The hash
+	 * picks a value in [-0.5, +0.5] per axis, so even a halfway roughness of 0.5 would push every
+	 * mesh vertex up to 0.25 blocks. Measured runs confirmed that is enough to (a) turn flat land
+	 * into steep bumps that read as sub-diff walk walls - horizontal step motion gets consumed
+	 * ~100%% each tick, causing the "stutters / walks too slowly" symptom - and (b) pull floor
+	 * vertices into near-degenerate triangles that the exact collision sweep's positive-area gate
+	 * ignores, opening holes the player falls through. Capping effective roughness keeps the
+	 * setting as a terrain-pore texture (max 0.075 block displacement) so bumps never block
+	 * walking and triangles stay sturdy enough to sweep against.
+	 */
+	static final float ROUGHNESS_MAX = 0.15F;
 
 	// Points order
 	public static final int X0Y0Z0 = 0;
@@ -229,9 +249,28 @@ public final class OldSmoothTerrain extends SimpleMesher {
 		long i = (long) (worldX * 3129871d) ^ (long) worldY * 116129781L ^ (long) worldZ;
 
 		i = i * i * 42317861L + i * 11L;
-		point.x += ((float) (i >> 16 & 0xF) / 15.0F - 0.5F) * roughness;
-		point.y += ((float) (i >> 20 & 0xF) / 15.0F - 0.5F) * roughness;
-		point.z += ((float) (i >> 24 & 0xF) / 15.0F - 0.5F) * roughness;
+		float used = Math.min(roughness, ROUGHNESS_MAX);
+		float dx = ((float) (i >> 16 & 0xF) / 15.0F - 0.5F) * used;
+		float dy = ((float) (i >> 20 & 0xF) / 15.0F - 0.5F) * used;
+		float dz = ((float) (i >> 24 & 0xF) / 15.0F - 0.5F) * used;
+		point.x += dx;
+		point.y += dy;
+		point.z += dz;
+		if (LOG.isDebugEnabled() && roughness > 0.001F) {
+			// Roughness monitor: the slider (pushed to roughness = 1 - smoothness) displaces every
+			// mesh vertex by up to +-0.5*roughness in X/Y/Z. This is the ground truth for the
+			// "bumps all over flat land" and "fell through the floor" symptoms - track the worst
+			// displacement actually applied and its world position.
+			if (Math.abs(dx) > maxRoughnessDelta || Math.abs(dy) > maxRoughnessDelta || Math.abs(dz) > maxRoughnessDelta) {
+				maxRoughnessDelta = Math.max(maxRoughnessDelta, Math.max(Math.abs(dx), Math.max(Math.abs(dy), Math.abs(dz))));
+			}
+			long now = net.minecraft.Util.getMillis();
+			if (now - lastRoughnessLog > 1000L) {
+				lastRoughnessLog = now;
+				LOG.debug("Roughness active: raw={} clampedUsed={} worst |delta| applied so far={} at world=({},{},{})",
+						roughness, used, maxRoughnessDelta, worldX + dx, worldY + dy, worldZ + dz);
+			}
+		}
 	}
 
 	/**

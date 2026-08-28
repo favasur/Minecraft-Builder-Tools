@@ -1,15 +1,13 @@
 package net.buildertools;
 
-import io.github.favasur.fullslabs.client.PlacementOverlay;
+import io.github.favasur.fullslabs.client.BlockFaceOverlay;
 import io.github.favasur.smoothterrain.fabric.ClientInit;
 import net.buildertools.client.ClientEvents;
 import net.buildertools.client.RotatedBlockRenderer;
 import net.buildertools.client.SelectionRenderer;
 import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
-import net.minecraft.client.DeltaTracker;
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
 import net.neoforged.neoforge.common.NeoForge;
 
 /**
@@ -25,36 +23,12 @@ public final class BuilderToolsModClient implements ClientModInitializer {
         NeoForge.EVENT_BUS.register(SelectionRenderer.class);
         NeoForge.EVENT_BUS.register(RotatedBlockRenderer.class);
         FabricHooks.registerClient();
-        HudRenderCallback.EVENT.register(BuilderToolsModClient::renderPlacementOverlay);
-    }
-
-    /** FullSlabs screen-space slab-placement overlay (edge/fill highlight while placing). */
-    private static void renderPlacementOverlay(GuiGraphics guiGraphics, DeltaTracker deltaTracker) {
-        PlacementOverlay.render(new PlacementOverlay.OverlayDraw() {
-            @Override
-            public int width() {
-                return guiGraphics.guiWidth();
+        WorldRenderEvents.AFTER_ENTITIES.register(context -> {
+            Minecraft mc = Minecraft.getInstance();
+            if (mc.options.hideGui) {
+                return;
             }
-
-            @Override
-            public int height() {
-                return guiGraphics.guiHeight();
-            }
-
-            @Override
-            public void fill(int x1, int y1, int x2, int y2, int color) {
-                guiGraphics.fill(x1, y1, x2, y2, color);
-            }
-
-            @Override
-            public void hLine(int x1, int x2, int y, int color) {
-                guiGraphics.hLine(x1, x2, y, color);
-            }
-
-            @Override
-            public void vLine(int x1, int y1, int y2, int color) {
-                guiGraphics.vLine(x1, y1, y2, color);
-            }
-        }, Minecraft.getInstance());
+            BlockFaceOverlay.renderFaceOverlay(mc.gameRenderer.getMainCamera());
+        });
     }
 }

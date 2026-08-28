@@ -133,6 +133,8 @@ public final class PlacementOverlay {
         if (!mc.level.getBlockState(landing).canBeReplaced()) {
             return null;
         }
+        // The click geometry is evaluated against the clicked block (identical to the placement
+        // mixin's BlockPlaceContext), so the overlay and the placed slab always agree.
         Direction target = SlabPlacement.getTargetedDirection(
                 Controls.getPlacementMode(mc.player.getUUID()), hit.getDirection(),
                 mc.player.getDirection(), pos, hit.getLocation());

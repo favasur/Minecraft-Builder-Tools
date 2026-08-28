@@ -6,6 +6,8 @@ import it.unimi.dsi.fastutil.ints.IntArrayList;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.shapes.BitSetDiscreteVoxelShape;
 import net.minecraft.world.phys.shapes.Shapes;
@@ -38,6 +40,10 @@ import java.util.List;
  * empty 1x1x1 grid and every other {@code VoxelShape} method is answered from the triangle list.
  */
 public final class MeshCollisionShape extends VoxelShape {
+
+	private static final Logger LOG = LogManager.getLogger("SmoothTerrain");
+	/** Throttles the per-tick debug logs so a slow slope doesn't flood the log every frame. */
+	private static long lastStepDebugLog = 0L;
 
 	/** A world-space triangle. */
 	public static final class Tri {
@@ -182,6 +188,15 @@ public final class MeshCollisionShape extends VoxelShape {
 
 	private final Tri[] triangles;
 	private final AABB bounds;
+	/**
+	 * Distinct Y coordinates of the mesh's surface vertices, sorted ascending. Minecraft's
+	 * automatic step-up (Entity.collide -> collectCandidateStepUpHeights) derives its candidate
+	 * step heights from every collider's {@link #getCoords(Direction.Axis#Y)}: returning the
+	 * surface heights lets the player walk up smooth slopes the way it walks up vanilla steps.
+	 * The whole section bounds (the old behaviour) hid the surface heights inside a single
+	 * min/max pair, so the step-up never engaged and slopes were unwalkable.
+	 */
+	private final DoubleList yCoords;
 	/** The 4-block cell of the shape's bounds min corner; cell keys are stored relative to it so
 	 *  they stay small (a shape spans at most a few cells) and never overflow the packed fields. */
 	private final int baseCellX, baseCellY, baseCellZ;
@@ -203,7 +218,35 @@ public final class MeshCollisionShape extends VoxelShape {
 		if (triangles.length == 0) {
 			minX = minY = minZ = maxX = maxY = maxZ = 0;
 		}
+		// Build the auto-step candidate heights from the distinct surface Y values, coalesced to a
+		// 1/16-block grid. Surface nets emit a vertex roughly every 1/60 of a block along a slope,
+		// so uncoalesced the candidate set balloons (the measured run served 98 coords) and the
+		// vanilla auto-step churns over near-identical micro-heights every horizontal collision,
+		// which is what reads as stutter / slow ascent. Snapping to 1/16 collapses those
+		// near-duplicates into a single representative height per surface level without removing
+		// any real step the player can stand on.
+		it.unimi.dsi.fastutil.doubles.DoubleOpenHashSet ySet = new it.unimi.dsi.fastutil.doubles.DoubleOpenHashSet();
+		for (Tri t : triangles) {
+			// Round to the nearest 1/16 (0.0625) so same-level vertices share one candidate.
+			ySet.add(java.lang.Math.round(t.ay * 16.0) / 16.0);
+			ySet.add(java.lang.Math.round(t.by * 16.0) / 16.0);
+			ySet.add(java.lang.Math.round(t.cy * 16.0) / 16.0);
+		}
+		double[] yArr = ySet.toDoubleArray();
+		java.util.Arrays.sort(yArr);
+		this.yCoords = DoubleArrayList.wrap(yArr);
 		this.bounds = new AABB(minX, minY, minZ, maxX, maxY, maxZ);
+		if (LOG.isDebugEnabled()) {
+			// Surface-step monitoring for the "walks slowly / stutters on slopes" bug: log how many
+			// distinct surface Y coordinates are being handed to the vanilla auto-step, plus the
+			// reachable band (tris count, height span). A very large / widely spread candidate set is
+			// the prime suspect for the residual stutter.
+			LOG.debug("MeshCollisionShape section: tris={} cellBounds={}..{} yCoords={} span={}..{}",
+					triangles.length, minX, maxX, yArr.length,
+					yArr.length == 0 ? Double.NaN : yArr[0],
+					yArr.length == 0 ? Double.NaN : yArr[yArr.length - 1]);
+		}
+
 		this.baseCellX = (int) Math.floor(minX / CELL_SIZE);
 		this.baseCellY = (int) Math.floor(minY / CELL_SIZE);
 		this.baseCellZ = (int) Math.floor(minZ / CELL_SIZE);
@@ -279,6 +322,21 @@ public final class MeshCollisionShape extends VoxelShape {
 			addQuad(tris, p[0], p[3], p[2], p[1]); // north
 			addQuad(tris, p[4], p[5], p[6], p[7]); // south
 		});
+		if (LOG.isDebugEnabled()) {
+			// Rotated-block collision geometry monitor ("no physics" / "render offset N blocks"
+			// bug): report the source shape bounds, the rotation center the mesh was generated
+			// around, and the resulting world AABB so any centre-offset is visible in the log.
+			double minX = Double.POSITIVE_INFINITY, minY = Double.POSITIVE_INFINITY, minZ = Double.POSITIVE_INFINITY;
+			double maxX = Double.NEGATIVE_INFINITY, maxY = Double.NEGATIVE_INFINITY, maxZ = Double.NEGATIVE_INFINITY;
+			for (Tri t : tris) {
+				minX = Math.min(minX, t.min(0)); maxX = Math.max(maxX, t.max(0));
+				minY = Math.min(minY, t.min(1)); maxY = Math.max(maxY, t.max(1));
+				minZ = Math.min(minZ, t.min(2)); maxZ = Math.max(maxZ, t.max(2));
+			}
+			LOG.debug("Rotated block collision: srcShapeBounds={} center=({},{},{}) yaw={} pitch={} -> worldAABB=({},{},{})-({},{},{}) tris={}",
+					shape.bounds(), cx, cy, cz, yaw, pitch,
+					minX, minY, minZ, maxX, maxY, maxZ, tris.size());
+		}
 		return new MeshCollisionShape(tris);
 	}
 
@@ -319,6 +377,11 @@ public final class MeshCollisionShape extends VoxelShape {
 		double sMin = coord(box, v, false), sMax = coord(box, v, true);
 		boolean pos = motion > 0;
 		double best = 1.0;
+		// Fall-through probe: while falling down (Y, negative motion) note whether any terrain
+		// triangle overlaps the swept vertical window but fails to stop the fall. If that happens
+		// the collision floor is not watertight under the player (a hole / displaced-vertex gap).
+		boolean ySinkCandidates = axis == Direction.Axis.Y && !pos;
+		boolean yCandidateSeen = false;
 		// Broadphase: only test triangles in the 4-block cells the swept box (box inflated by the
 		// motion along this axis) touches. The cell coordinates must stay in WORLD X/Y/Z order;
 		// the old implementation used the perpendicular axes as X/Z unconditionally, which made
@@ -353,6 +416,11 @@ public final class MeshCollisionShape extends VoxelShape {
 						if (t.max(a) < sweptMin || t.min(a) > sweptMax) {
 							continue;
 						}
+						// A triangle overlaps the fall window at all - if the player still passes through,
+						// the surface has a gap. Mark that a floor triangle was in range this downward sweep.
+						if (ySinkCandidates) {
+							yCandidateSeen = true;
+						}
 						double f = t.sweptFraction(a, u, v, bMin, bMax, rMin, rMax, sMin, sMax, motion, pos);
 						if (f < best) {
 							best = f;
@@ -362,6 +430,27 @@ public final class MeshCollisionShape extends VoxelShape {
 						}
 					}
 				}
+			}
+		}
+		if (axis != Direction.Axis.Y && best < 1.0D) {
+			// A horizontal collision consumed part of the motion - the very event that triggers the
+			// vanilla auto-step. Log (throttled) the axis, how much motion survived, and the size of
+			// the candidate step-height set, to correlate the stutter with step-up behaviour.
+			long now = net.minecraft.Util.getMillis();
+			if (now - lastStepDebugLog > 500L) {
+				lastStepDebugLog = now;
+				LOG.debug("Slope hit axis={} survived={} of {} (blocked ~{}) yCoords={}",
+						axis, best * motion, motion, (1.0D - best) * motion, yCoords.size());
+			}
+		}
+		if (yCandidateSeen && best >= 1.0D) {
+			// Falling down through a window with terrain triangles in it but NO collision contact: the
+			// collision floor under the player is incomplete (a gap / displaced-vertex hole).
+			long now = net.minecraft.Util.getMillis();
+			if (now - lastStepDebugLog > 500L) {
+				lastStepDebugLog = now;
+				LOG.debug("POSSIBLE FALL-THROUGH: falling Y with {} triangles in range but no contact (box={}, motion={})",
+						triangles.length, box, motion);
 			}
 		}
 		return best * motion;
@@ -386,8 +475,24 @@ public final class MeshCollisionShape extends VoxelShape {
 
 	@Override
 	public DoubleList getCoords(Direction.Axis axis) {
-		double lo = axis == Direction.Axis.X ? bounds.minX : axis == Direction.Axis.Y ? bounds.minY : bounds.minZ;
-		double hi = axis == Direction.Axis.X ? bounds.maxX : axis == Direction.Axis.Y ? bounds.maxY : bounds.maxZ;
+		if (axis == Direction.Axis.Y) {
+			// The surface heights (sorted) - consumed by the vanilla auto-step to pick how far to
+			// lift the entity when walking into a slope.
+			long now = net.minecraft.Util.getMillis();
+			if (now - lastStepDebugLog > 500L) {
+				lastStepDebugLog = now;
+				if (LOG.isDebugEnabled()) {
+					LOG.debug("Auto-step serving {} candidate Y coords (first={} last={}): {}",
+							yCoords.size(),
+							yCoords.isEmpty() ? "n/a" : Double.toString(yCoords.getDouble(0)),
+							yCoords.isEmpty() ? "n/a" : Double.toString(yCoords.getDouble(yCoords.size() - 1)),
+							yCoords);
+				}
+			}
+			return yCoords;
+		}
+		double lo = axis == Direction.Axis.X ? bounds.minX : bounds.minZ;
+		double hi = axis == Direction.Axis.X ? bounds.maxX : bounds.maxZ;
 		return DoubleArrayList.wrap(new double[]{lo, hi});
 	}
 

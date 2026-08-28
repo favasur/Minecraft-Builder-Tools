@@ -24,12 +24,13 @@ public final class FullSlabsMixinPlugin implements IMixinConfigPlugin {
 
     @Override
     public boolean shouldApplyMixin(String targetClassName, String mixinClassName) {
-        try {
-            Class.forName(targetClassName.replace('/', '.'), false, FullSlabsMixinPlugin.class.getClassLoader());
-            return true;
-        } catch (Throwable t) {
-            return false;
-        }
+        // Check classpath presence WITHOUT loading the class: Class.forName would eagerly load
+        // e.g. BlockBehaviour, which then trips MixinTargetAlreadyLoadedException for the next
+        // mixin targeting the same class (both BlockSupportShapeMixin and SlabLightMixin target
+        // BlockBehaviour). A resource lookup answers the same "is the target present on this
+        // side" question without poisoning later mixins.
+        String resource = targetClassName.replace('.', '/') + ".class";
+        return FullSlabsMixinPlugin.class.getClassLoader().getResource(resource) != null;
     }
 
     @Override

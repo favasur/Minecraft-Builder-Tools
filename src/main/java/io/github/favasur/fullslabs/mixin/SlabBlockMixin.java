@@ -41,7 +41,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class SlabBlockMixin {
 
     @Inject(method = "createBlockStateDefinition(Lnet/minecraft/world/level/block/state/StateDefinition$Builder;)V", at = @At("HEAD"))
-    private void fullslabs$stateDefinition(StateDefinition.Builder<Block, BlockState> builder) {
+    private void fullslabs$stateDefinition(StateDefinition.Builder<Block, BlockState> builder, CallbackInfo ci) {
         builder.add(SlabVertical.VERTICAL, SlabVertical.DIRECTION);
     }
 

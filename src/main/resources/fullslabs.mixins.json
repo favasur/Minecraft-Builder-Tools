@@ -10,9 +10,9 @@
     ],
     "mixins": [
         "BlockSupportShapeMixin",
+        "SlabLightMixin",
         "ServerPlayerGameModeMixin",
-        "SlabBlockMixin",
-        "SlabLightMixin"
+        "SlabBlockMixin"
     ],
     "injectors": {
         "defaultRequire": 1

@@ -10,6 +10,8 @@ import net.minecraft.client.resources.model.geometry.BakedQuad;
 import net.minecraft.client.resources.model.sprite.Material;
 import net.minecraft.core.Direction;
 import net.minecraft.util.RandomSource;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
@@ -23,6 +25,7 @@ import org.joml.Vector3f;
  * files and no per-slab registry entries.
  */
 public final class VerticalSlabModel implements BlockStateModel {
+    private static final Logger LOG = LogManager.getLogger("FullSlabs");
     private final BlockStateModel parent;
     private final Direction occupied;
     private final Matrix4f transform;
@@ -59,6 +62,8 @@ public final class VerticalSlabModel implements BlockStateModel {
         this.transform = new Matrix4f().translate(translation).rotate(rotation);
         this.forward = directionMap(rotation);
         this.inverse = directionMap(rotation.conjugate(new Quaternionf()));
+        LOG.debug("Vertical slab model built: occupied={} translation={} forward={} inverse={}",
+                occupied, translation, forward, inverse);
     }
 
     private static Map<Direction, Direction> directionMap(Quaternionf rotation) {
@@ -118,13 +123,32 @@ public final class VerticalSlabModel implements BlockStateModel {
             this.model = model;
         }
 
+        private long lastQuadLog = 0L;
+
         @Override
         public List<BakedQuad> getQuads(Direction direction) {
+            List<BakedQuad> out;
             if (direction == null) {
-                return this.parent.getQuads(null).stream().map(this.model::transformQuad).toList();
+                out = this.parent.getQuads(null).stream().map(this.model::transformQuad).toList();
+            } else {
+                Direction parentDirection = this.model.inverse.get(direction);
+                out = this.parent.getQuads(parentDirection).stream().map(this.model::transformQuad).toList();
             }
-            Direction parentDirection = this.model.inverse.get(direction);
-            return this.parent.getQuads(parentDirection).stream().map(this.model::transformQuad).toList();
+            if (LOG.isDebugEnabled()) {
+                long now = net.minecraft.Util.getMillis();
+                if (now - this.lastQuadLog > 1000L) {
+                    this.lastQuadLog = now;
+                    // "No visible textures" symptom: faces come out empty when a mapped parent
+                    // direction yields no quads or the transform collapses them - log the mapping
+                    // and count for each requested cull face to pin which face is missing.
+                    LOG.debug("Vertical slab part: cullFace={} -> parentCull={} produced {} quads (occupied={})",
+                            direction,
+                            direction == null ? null : this.model.inverse.get(direction),
+                            out.size(),
+                            this.model.occupied);
+                }
+            }
+            return out;
         }
 
         @Override

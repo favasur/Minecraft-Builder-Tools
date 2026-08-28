@@ -3,6 +3,8 @@ package io.github.favasur.fullslabs.block;
 import java.util.Map;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.SlabBlock;
 import net.minecraft.world.level.block.state.BlockState;
@@ -27,6 +29,8 @@ import net.minecraft.world.phys.shapes.VoxelShape;
  * itself never changes.
  */
 public final class SlabVertical {
+
+    private static final Logger LOG = LogManager.getLogger("FullSlabs");
 
     /** True when the slab stands vertically. Defaults to false so existing slabs are unaffected. */
     public static final BooleanProperty VERTICAL = BooleanProperty.create("vertical");
@@ -122,34 +126,32 @@ public final class SlabVertical {
 
     /**
      * Result state for a placement: {@code target} UP/DOWN produces the vanilla top/bottom slab,
-     * a horizontal target produces a vertical slab. The occupied half reproduces the original
-     * FullSlabs rule exactly: clicking the center of a horizontal block face hugs the wall (the
-     * far half), while edge clicks and top/bottom face clicks pick the half via the player's yaw.
+     * a horizontal target produces a vertical slab. The occupied half is the target half itself -
+     * the click position already selects the exact half/edge, so the placed slab always lands on
+     * the region the placement overlay highlights. The only special case is clicking the center
+     * of a vertical block face, which hugs the wall: the slab occupies the far half of the cell
+     * against the face (the original FullSlabs rule).
      */
     public static BlockState getTargetedState(SlabBlock slab, Direction blockFace, Direction target, double cameraYaw) {
         BlockState base = slab.defaultBlockState();
-        return switch (target) {
+        BlockState result = switch (target) {
             case UP -> base.setValue(BlockStateProperties.SLAB_TYPE, SlabType.TOP);
             case DOWN -> base.setValue(BlockStateProperties.SLAB_TYPE, SlabType.BOTTOM);
             default -> {
-                Direction occupied;
-                Direction.Axis faceAxis = blockFace.getAxis();
-                if (faceAxis == target.getAxis()) {
-                    occupied = target.getOpposite();
-                } else {
-                    float altYaw = faceAxis.isVertical() ? target.toYRot() : blockFace.toYRot();
-                    double delta = wrapToMinus180to180(cameraYaw - altYaw);
-                    boolean towards = faceAxis.isVertical()
-                            ? Math.abs(delta) < 90.0
-                            : delta < 0.0 == (blockFace.getCounterClockWise() == target);
-                    occupied = towards ? target : target.getOpposite();
+                if (blockFace == target) {
+                    // Center of a block face: a plain horizontal slab (the vanilla rule) instead of
+                    // standing the slab on its edge.
+                    yield base.setValue(BlockStateProperties.SLAB_TYPE, SlabType.BOTTOM);
                 }
-                yield base.setValue(VERTICAL, true).setValue(DIRECTION, occupied);
+                yield base.setValue(VERTICAL, true).setValue(DIRECTION, target);
             }
         };
-    }
-
-    private static double wrapToMinus180to180(double value) {
-        return value < 0.0 ? 180.0 - Math.abs(value) % 360.0 : value - 180.0;
+        if (LOG.isDebugEnabled()) {
+            // Placement-decision monitor threads the CENTER-region bug: log the resolved target and
+            // resulting state for every click so a wrong "right-sided vertical slab" is visible.
+            LOG.debug("getTargetedState slab={} blockFace={} target={} -> {}",
+                    slab, blockFace, target, result);
+        }
+        return result;
     }
 }

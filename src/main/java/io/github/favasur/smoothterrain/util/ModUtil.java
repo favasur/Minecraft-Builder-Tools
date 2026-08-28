@@ -60,7 +60,16 @@ public class ModUtil {
 	 * @return Positive density if the block is smoothable (and will be at least partially inside the isosurface)
 	 */
 	public static float getBlockDensity(boolean shouldSmooth, BlockState state) {
-		return shouldSmooth ? getSmoothBlockDensity(state) : NOT_SMOOTHABLE;
+		if (shouldSmooth)
+			return getSmoothBlockDensity(state);
+		// Solid-render (full opaque) blocks - walls, planks, ores, logs, bricks, ... - are treated
+		// as fully inside the shape so smooth surfaces clamp to their faces instead of receding
+		// from them (treating them as air left ~0.3-block-wide empty gaps in front of solid
+		// blocks). The check is the exact one the vanilla block-state cache uses, so registered
+		// states answer it from the cached flag without touching the empty getter.
+		if (platform.isSolidRender(state))
+			return FULLY_SMOOTHABLE;
+		return NOT_SMOOTHABLE;
 	}
 
 	public static float getSmoothBlockDensity(BlockState state) {

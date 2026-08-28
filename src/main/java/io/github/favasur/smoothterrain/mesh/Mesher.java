@@ -4,6 +4,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import io.github.favasur.smoothterrain.collision.ShapeConsumer;
 import io.github.favasur.smoothterrain.util.Area;
 import io.github.favasur.smoothterrain.util.Face;
+import io.github.favasur.smoothterrain.util.ModUtil;
 import io.github.favasur.smoothterrain.util.PerformanceCriticalAllocation;
 import net.minecraft.Util;
 import net.minecraft.core.BlockPos;
@@ -21,13 +22,56 @@ public interface Mesher {
 	@PerformanceCriticalAllocation
 	ThreadLocal<Face> FACE_INSTANCE = ThreadLocal.withInitial(Face::new);
 
+	@PerformanceCriticalAllocation
+	ThreadLocal<MutableBlockPos> GEOMETRY_PROBE_POS = ThreadLocal.withInitial(MutableBlockPos::new);
+
 	default void generateGeometry(Area area, Predicate<BlockState> isSmoothable, FaceAction action) {
 		try {
-			generateGeometryInternal(area, isSmoothable, action);
+			generateGeometryInternal(area, isSmoothable, (pos, face) -> {
+				if (isDuplicateOfSolidBlockFace(area, isSmoothable, face))
+					// The non-smoothable solid block's own vanilla faces already render this surface
+					return true;
+				return action.apply(pos, face);
+			});
 		} catch (Throwable t) {
 			Util.pauseInIde(t);
 			throw t;
 		}
+	}
+
+	/**
+	 * Solid (non-smoothable) blocks are treated as fully inside the density field (see
+	 * {@link io.github.favasur.smoothterrain.util.ModUtil#getBlockDensity}), which makes smooth
+	 * surfaces clamp to their faces. The mesher then also emits the solid block's own boundary
+	 * faces (the faces between a solid block and air), which would exactly overlap the block's
+	 * vanilla faces and z-fight with them. This skips such faces: a real sloped smooth surface
+	 * never lies flat on a cell boundary, so only true cell-boundary faces are ever affected.
+	 */
+	static boolean isDuplicateOfSolidBlockFace(Area area, Predicate<BlockState> isSmoothable, Face face) {
+		float minX = Math.min(Math.min(face.v0.x, face.v1.x), Math.min(face.v2.x, face.v3.x));
+		float maxX = Math.max(Math.max(face.v0.x, face.v1.x), Math.max(face.v2.x, face.v3.x));
+		float minY = Math.min(Math.min(face.v0.y, face.v1.y), Math.min(face.v2.y, face.v3.y));
+		float maxY = Math.max(Math.max(face.v0.y, face.v1.y), Math.max(face.v2.y, face.v3.y));
+		float minZ = Math.min(Math.min(face.v0.z, face.v1.z), Math.min(face.v2.z, face.v3.z));
+		float maxZ = Math.max(Math.max(face.v0.z, face.v1.z), Math.max(face.v2.z, face.v3.z));
+		float sx = maxX - minX;
+		float sy = maxY - minY;
+		float sz = maxZ - minZ;
+		float cx = (minX + maxX) * 0.5F;
+		float cy = (minY + maxY) * 0.5F;
+		float cz = (minZ + maxZ) * 0.5F;
+		if (sx <= 0.05F && sx <= sy && sx <= sz)
+			return solidOnEitherSide(area, isSmoothable, cx - 0.01F, cy, cz) || solidOnEitherSide(area, isSmoothable, cx + 0.01F, cy, cz);
+		if (sy <= 0.05F && sy <= sx && sy <= sz)
+			return solidOnEitherSide(area, isSmoothable, cx, cy - 0.01F, cz) || solidOnEitherSide(area, isSmoothable, cx, cy + 0.01F, cz);
+		if (sz <= 0.05F && sz <= sx && sz <= sy)
+			return solidOnEitherSide(area, isSmoothable, cx, cy, cz - 0.01F) || solidOnEitherSide(area, isSmoothable, cx, cy, cz + 0.01F);
+		return false;
+	}
+
+	static boolean solidOnEitherSide(Area area, Predicate<BlockState> isSmoothable, float x, float y, float z) {
+		BlockState state = area.getBlockStateFaultTolerant(GEOMETRY_PROBE_POS.get().set(x, y, z));
+		return !isSmoothable.test(state) && ModUtil.platform.isSolidRender(state);
 	}
 
 	default void generateCollisions(Area area, Predicate<BlockState> isSmoothable, ShapeConsumer action) {

@@ -7,9 +7,9 @@
     "mixins": [
         "BlockStateModelSetMixin",
         "BlockSupportShapeMixin",
+        "SlabLightMixin",
         "ServerPlayerGameModeMixin",
         "SlabBlockMixin",
-        "SlabLightMixin",
         "client.HudMixin"
     ],
     "injectors": {

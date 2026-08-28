@@ -11,6 +11,8 @@ import net.minecraft.client.renderer.texture.TextureAtlasSprite;
 import net.minecraft.client.resources.model.BakedModel;
 import net.minecraft.core.Direction;
 import net.minecraft.util.RandomSource;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import net.minecraft.world.level.block.state.BlockState;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
@@ -25,6 +27,11 @@ import org.joml.Vector3f;
  * entries.
  */
 public final class VerticalSlabModel implements BakedModel {
+    private static final Logger LOG = LogManager.getLogger("FullSlabs");
+    /** One-shot diagnostic: dumps the parent model's quad counts per cull face on first render so
+     *  we can see where the slab's top-face geometry actually lives (the "west big face missing"
+     *  bug traces to the parent yielding no UP culled quads). */
+    private static boolean parentBakeLogged;
     /** Vertex stride of the BLOCK vertex format (position, color, uv0, uv2, normal). */
     private static final int VERTEX_STRIDE = 8;
 
@@ -88,8 +95,28 @@ public final class VerticalSlabModel implements BakedModel {
     @Override
     public List<BakedQuad> getQuads(BlockState state, Direction side, RandomSource random) {
         Direction parentSide = side == null ? null : this.inverse.get(side);
-        return this.parent.getQuads(SlabVertical.flat(state), parentSide, random)
+        List<BakedQuad> out = this.parent.getQuads(SlabVertical.flat(state), parentSide, random)
                 .stream().map(this::transformQuad).toList();
+        if (LOG.isDebugEnabled()) {
+            // "No visible textures" symptom: if a cull face maps to a parent face that yields no
+            // quads here, that face is silently missing - log the mapping and quad count.
+            LOG.debug("Vertical slab {}: cullFace={} -> parentCull={} produced {} quads",
+                    this.occupied, side, parentSide, out.size());
+            // One-shot diagnosis of WHERE the parent's geometry lives: dump every cull face's
+            // quad count for the flat parent state. This reveals whether the missing big-west
+            // face (parent UP, from inverse of WEST) has its quads under null, under a side face,
+            // or is genuinely absent.
+            if (parentBakeLogged == false) {
+                parentBakeLogged = true;
+                for (Direction d : Direction.values()) {
+                    LOG.debug("Vertical-slab parent bake: flat={} cull={} quads={}",
+                            SlabVertical.flat(state), d, this.parent.getQuads(SlabVertical.flat(state), d, random).size());
+                }
+                LOG.debug("Vertical-slab parent bake: flat={} cull=null quads={}",
+                        SlabVertical.flat(state), this.parent.getQuads(SlabVertical.flat(state), null, random).size());
+            }
+        }
+        return out;
     }
 
     private BakedQuad transformQuad(BakedQuad quad) {

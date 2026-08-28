@@ -2,6 +2,7 @@ package io.github.favasur.smoothterrain.mesh;
 
 import io.github.favasur.smoothterrain.collision.CollisionHandler;
 import io.github.favasur.smoothterrain.collision.ShapeConsumer;
+import io.github.favasur.smoothterrain.config.SmoothTerrainConfig;
 import io.github.favasur.smoothterrain.mesh.TestData.TestMesh;
 import io.github.favasur.smoothterrain.util.Area;
 import io.github.favasur.smoothterrain.util.ModUtil;
@@ -76,13 +77,13 @@ public class SurfaceNets extends SDFMesher {
 		// Because we are passing block densities instead of corner distances (see the NB comment in generateDistanceField) we need to offset the mesh
 		float offset = smoother ? 1F : 0.5F;
 		generateOrThrow2(
-			distanceField, dims,
+			distanceField, dims, area,
 			(x, y, z) -> fullCellAction.apply(x + offset, y + offset, z + offset),
 			(pos, face) -> action.apply(pos, face.add(offset))
 		);
 	}
 
-	private static void generateOrThrow2(float[] distanceField, BlockPos dims, FullCellAction fullCellAction, FaceAction action) {
+	private static void generateOrThrow2(float[] distanceField, BlockPos dims, Area area, FullCellAction fullCellAction, FaceAction action) {
 		var pos = POS_INSTANCE.get();
 		var face = FACE_INSTANCE.get();;
 		int n = 0;
@@ -186,6 +187,13 @@ public class SurfaceNets extends SDFMesher {
 					vertex.x = x + s * vertexUntilIFigureOutTheInterpolationAndIntersection[0];
 					vertex.y = y + s * vertexUntilIFigureOutTheInterpolationAndIntersection[1];
 					vertex.z = z + s * vertexUntilIFigureOutTheInterpolationAndIntersection[2];
+					// Terrain Smoothness (roughness): the slider is stored inverted as the roughness
+					// (1 - smoothness). Applying the same deterministic per-point noise the
+					// OldSmoothTerrain mesher uses makes the setting affect the default SurfaceNets
+					// mesher too: 1.0 (roughness 0) leaves the clean surface, lower values roughen it
+					// up to 0.1 (roughness 0.9). The jitter is hashed from the world position so
+					// neighbouring chunks agree and the mesh stays watertight.
+					OldSmoothTerrain.givePointRoughness(SmoothTerrainConfig.Server.oldSmoothTerrainRoughness, area, vertex);
 
 					//Now we need to add faces together, to do this we just loop over 3 basis components
 					for (int axis = 0; axis < 3; ++axis) {

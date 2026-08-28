@@ -94,19 +94,51 @@ public final class CollisionHandler {
 			var dx = Mesher.validateMeshOffset(area.start.getX() - blockPos.getX());
 			var dy = Mesher.validateMeshOffset(area.start.getY() - blockPos.getY());
 			var dz = Mesher.validateMeshOffset(area.start.getZ() - blockPos.getZ());
-			generate(area, mesher, (x0, y0, z0, x1, y1, z1) -> {
-				var shape = Shapes.box(
-					dx + x0, dy + y0, dz + z0,
-					dx + x1, dy + y1, dz + z1
-				);
-				ref[0] = Shapes.joinUnoptimized(ref[0], shape, BooleanOp.OR);
-				return true;
+			// Build the collision from the same polygons the renderer draws (the rotated-blocks
+			// approach): every rendered face becomes collision geometry along its surface, so the
+			// shape matches the visible mesh instead of a stack of full cubes. Faces are filtered
+			// to this block's cell (area-relative: [-dx, -dx+1] on each axis).
+			float cellMinX = -dx - 0.01F;
+			float cellMaxX = -dx + 1.01F;
+			float cellMinY = -dy - 0.01F;
+			float cellMaxY = -dy + 1.01F;
+			float cellMinZ = -dz - 0.01F;
+			float cellMaxZ = -dz + 1.01F;
+			mesher.generateGeometry(area, SmoothTerrain.smoothableHandler::isSmoothable, (pos, face) -> {
+				if (face.v0.x > cellMaxX || face.v1.x > cellMaxX || face.v2.x > cellMaxX || face.v3.x > cellMaxX ||
+						face.v0.x < cellMinX || face.v1.x < cellMinX || face.v2.x < cellMinX || face.v3.x < cellMinX ||
+						face.v0.y > cellMaxY || face.v1.y > cellMaxY || face.v2.y > cellMaxY || face.v3.y > cellMaxY ||
+						face.v0.y < cellMinY || face.v1.y < cellMinY || face.v2.y < cellMinY || face.v3.y < cellMinY ||
+						face.v0.z > cellMaxZ || face.v1.z > cellMaxZ || face.v2.z > cellMaxZ || face.v3.z > cellMaxZ ||
+						face.v0.z < cellMinZ || face.v1.z < cellMinZ || face.v2.z < cellMinZ || face.v3.z < cellMinZ)
+					return true; // face does not reach this block's cell
+				return generateShapesForFace(face, (x0, y0, z0, x1, y1, z1) -> {
+					ref[0] = Shapes.joinUnoptimized(ref[0], Shapes.box(
+						dx + x0, dy + y0, dz + z0,
+						dx + x1, dy + y1, dz + z1
+					), BooleanOp.OR);
+					return true;
+				});
 			});
 		} finally {
 			if (reader instanceof Level)
 				((Level) reader).getProfiler().pop();
 		}
 		return ref[0];//.optimize();
+	}
+
+	/**
+	 * Turns one rendered mesh face into collision boxes along its surface, exactly like the
+	 * surface-nets collision generator does for the same faces.
+	 */
+	private static boolean generateShapesForFace(Face face, ShapeConsumer consumer) {
+		var centre = new Vec();
+		var vertexNormals = new Face();
+		var faceNormal = new Vec();
+		face.assignAverageTo(centre);
+		face.assignNormalTo(vertexNormals);
+		vertexNormals.assignAverageTo(faceNormal);
+		return CollisionHandler.generateShapes(centre, faceNormal, consumer, face);
 	}
 
 	// region indev

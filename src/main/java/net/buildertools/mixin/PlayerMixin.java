@@ -29,6 +29,14 @@ public abstract class PlayerMixin {
                 : BuilderServerHandler.hasNoClip(self);
         if (enabled) {
             self.noPhysics = true;
+            // No Clip must not dump the player through the floor when they are not already flying:
+            // noPhysics skips collision entirely, so gravity would pull them through the ground.
+            // Granting (and engaging) flight cancels gravity while keeping the pass-through
+            // behaviour, mirroring what the server-side toggle (applyPlayerAbilities) already does.
+            if (!self.getAbilities().mayfly || !self.getAbilities().flying) {
+                self.getAbilities().mayfly = true;
+                self.getAbilities().flying = true;
+            }
         }
     }
 }

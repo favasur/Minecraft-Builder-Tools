@@ -56,6 +56,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * Server-side implementation of every builder tool operation. All methods run on the server thread
@@ -77,11 +79,18 @@ public final class BuilderServerHandler {
      *  vanilla placement that arrives alongside the mod's OffGridBlockPacket. */
     private static final Map<UUID, RecentOffGrid> RECENT_OFF_GRID = new HashMap<>();
 
+    private static final Logger LOGGER = LogManager.getLogger("BuilderTools");
+
     private BuilderServerHandler() {
     }
 
     public static void sendMessage(ServerPlayer player, String message) {
         player.sendSystemMessage(Component.literal("[Builder] " + message));
+    }
+
+    /** Logs a placement confirmation at debug level instead of spamming chat. */
+    static void sendDebug(ServerPlayer player, String message) {
+        LOGGER.debug("[Builder] {}: {}", player.getScoreboardName(), message);
     }
 
     /** Sends a message and plays the error sound. */
@@ -495,7 +504,7 @@ public final class BuilderServerHandler {
             Vec3 c = existing.center(cell);
             RotationStore.set(level, cell, new RotationData(existing.state(), yaw, pitch, billboard, c));
             recordOffGridPlacement(player, cell);
-            sendMessage(player, "Rotated block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
+            sendDebug(player, "Rotated block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
                     + (billboard ? ", billboard" : "") + ").");
             playSound(player, ModSounds.SET_CORNER_1.get());
             return;
@@ -526,13 +535,23 @@ public final class BuilderServerHandler {
         }
         RotationStore.set(level, cell, new RotationData(state, yaw, pitch, billboard,
                 new Vec3(cx, cy, cz)));
+        // Debug monitor for the "rotated vertical slab has no physics / render offset N blocks"
+        // bug: report the grid cell, the requested world-space model center, the held block state
+        // and the collision-box AABB the server derived, so a centre-vs-cell offset (e.g. 6
+        // blocks toward the player) is immediately visible in the log.
+        if (LOGGER.isDebugEnabled()) {
+            AABB box = OffGridTransform.boxAround(cx, cy, cz, yaw, pitch, shape.bounds());
+            LOGGER.debug("[Builder] {}: offgrid placed cell={} state={} center=({},{},{}) yaw={} pitch={} box=({},{},{})-({},{},{})",
+                    player.getScoreboardName(), cell, state, cx, cy, cz, yaw, pitch,
+                    box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ);
+        }
         // Remember the cell: the vanilla use-item packet for the same click may arrive next,
         // and the server-side right-click handler uses this record to cancel the duplicate.
         recordOffGridPlacement(player, cell);
         if (!player.getAbilities().instabuild) {
             held.shrink(1);
         }
-        sendMessage(player, "Placed block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
+        sendDebug(player, "Placed block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
                 + (billboard ? ", billboard" : "") + ").");
         playSound(player, ModSounds.SET_CORNER_1.get());
     }
@@ -615,7 +634,7 @@ public final class BuilderServerHandler {
             atSpot.discardWithDisplay();
             spawnLegacyPair(level, c.x, c.y, c.z, state, yaw, pitch, billboard);
             recordOffGridPlacement(player, BlockPos.containing(cx, cy, cz));
-            sendMessage(player, "Rotated legacy block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch) + ").");
+            sendDebug(player, "Rotated legacy block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch) + ").");
             playSound(player, ModSounds.SET_CORNER_1.get());
             return;
         }

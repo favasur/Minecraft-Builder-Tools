@@ -36,5 +36,7 @@
   "subtitles.buildertools.tool.ruler.clear": "Ruler cleared",
   "subtitles.buildertools.tool.paint": "Terrain painted",
   "subtitles.buildertools.tool.scatter": "Terrain scattered",
-  "subtitles.buildertools.tool.smooth": "Terrain smoothed"
+  "subtitles.buildertools.tool.smooth": "Terrain smoothed",
+  "options.smoothterrain": "Smooth Terrain",
+  "options.smoothterrain.smoothness": "Terrain Smoothness"
 }
