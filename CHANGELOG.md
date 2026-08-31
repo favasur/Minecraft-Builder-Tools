@@ -2,6 +2,52 @@
 
 All notable changes to Builder Tools are documented in this file.
 
+## [0.2.2] — 2026-08-31
+
+### Added
+
+- **Arching (ALT+A)** — a brand-new building mechanic that turns a straight row of blocks into a
+  smooth, gap-free arch:
+  1. Hold **ALT+A** with a block/slab/stair/wall/fence in hand.
+  2. Place a row of blocks (RMB) while holding the chord.
+  3. Hold **LMB** and drag the mouse to stretch the row, just like ALT-stretching a selection.
+  4. Release, then click any block to the side — the row smoothly arches toward it.
+
+  Each block becomes a tapered **voussoir** (a wedge that is wider at the top and narrower at the
+  bottom), so the arch tiles with no gaps and stays exactly 1 m thick. Multi-block-wide walls are
+  arched into a full curved band — every column of the wall becomes its own row of voussoirs.
+
+- **Ellipse (ALT+E or ALT+C)** — turn a placed rectangle of blocks into a complete, closed
+  elliptical ring of voussoirs. The ring is split into equal arc-length steps, so every block is
+  a uniform 1 m wide at the centerline no matter how flat or round the ellipse is.
+
+- **Face-relative tunnels** — both mechanics are oriented by the block face you click. Click a
+  wall face for a vertical arch/ring, a floor or ceiling face for a horizontal one; the shape is
+  generated in the clicked face's plane and extruded along its normal, so you can branch tunnels
+  out of any side of a build.
+
+- **Live ghost previews** — while you aim the arch or ellipse click, a bright green preview shows
+  the exact curve (with its inner/outer edges) that will be created, computed from the block and
+  face under your crosshair. It morphs as you move the mouse, shows the full curved band for
+  multi-wide walls, and disappears when the click would fail.
+
+- All of the above is available on every platform: **NeoForge, Forge and Fabric for Minecraft
+  1.21.1 and 26.2** (six builds).
+
+### Fixed
+
+- **Undo now clears arches and rings** — undoing an arch/ellipse restores the original wall *and*
+  removes the deformed wedges, instead of leaving ghost wedges floating in the layer.
+- **Stretch no longer double-applies** on Forge 26.2 (the stretch remap ran twice, duplicating
+  blocks and pushing two undo entries).
+- Holding the ellipse chord no longer opens the inventory (E) or triggers the vanilla hotbar
+  save (C) — those keys are swallowed while ALT is held.
+
+### Changed
+
+- The arch/ellipse geometry is derived from one shared computation on the server and the client
+  preview, so what you see while aiming is exactly what the click generates.
+
 ## [0.2.0] — 2026-08-28
 
 ### Fixed
@@ -58,5 +104,6 @@ All notable changes to Builder Tools are documented in this file.
   1.21.1 and 26.2: in-world selection, copy/paste, fill, undo, full entity manipulation and a
   WorldEdit-style command set.
 
+[0.2.2]: https://github.com/favasur/Minecraft-Builder-Tools/releases/tag/0.2.2
 [0.2.0]: https://github.com/favasur/Minecraft-Builder-Tools/releases/tag/0.2.0
 [0.1.4]: https://github.com/favasur/Minecraft-Builder-Tools/releases/tag/0.1.4

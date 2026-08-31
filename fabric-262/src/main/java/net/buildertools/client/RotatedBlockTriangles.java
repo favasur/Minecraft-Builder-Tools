@@ -1,5 +1,7 @@
 package net.buildertools.client;
 
+import net.buildertools.util.ArchGeometry;
+import net.buildertools.util.EllipseGeometry;
 import net.buildertools.util.RotationData;
 import io.github.favasur.smoothterrain.mesh.MeshCollisionShape;
 import net.minecraft.client.Minecraft;
@@ -113,6 +115,14 @@ public final class RotatedBlockTriangles {
     @Nullable
     public static List<MeshCollisionShape.Tri> triangles(
             RotationData rot, BlockPos cell, BlockGetter level) {
+        // Arch / ellipse voussoirs have their own deterministic wedge geometry - never treat
+        // them as a rotated baked model.
+        if (rot.arch() != null) {
+            return ArchGeometry.wedgeTriangles(rot.arch());
+        }
+        if (rot.ellipse() != null) {
+            return EllipseGeometry.wedgeTriangles(rot.ellipse());
+        }
         return triangles(rot.state(), rot.yaw(), rot.pitch(), rot.center(cell), cell, level);
     }
 
@@ -120,6 +130,12 @@ public final class RotatedBlockTriangles {
     @Nullable
     public static List<MeshCollisionShape.Tri> triangles(
             RotationData rot, BlockPos cell, BlockGetter level, float yaw, float pitch) {
+        if (rot.arch() != null) {
+            return ArchGeometry.wedgeTriangles(rot.arch());
+        }
+        if (rot.ellipse() != null) {
+            return EllipseGeometry.wedgeTriangles(rot.ellipse());
+        }
         return triangles(rot.state(), yaw, pitch, rot.center(cell), cell, level);
     }
 

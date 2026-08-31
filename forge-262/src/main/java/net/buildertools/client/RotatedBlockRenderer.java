@@ -2,9 +2,13 @@ package net.buildertools.client;
 
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.buildertools.server.RotationStore;
+import net.buildertools.util.ArchGeometry;
+import net.buildertools.util.EllipseGeometry;
 import net.buildertools.util.OffGridTransform;
 import net.buildertools.util.RotationData;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.resources.model.geometry.BakedQuad;
+import java.util.List;
 import net.minecraft.client.renderer.SubmitNodeCollector;
 import net.minecraft.core.BlockPos;
 import net.minecraft.world.level.block.RenderShape;
@@ -39,7 +43,6 @@ public final class RotatedBlockRenderer {
     public static void register() {
         ForgeLevelRenderEvent.BUS.addListener(RotatedBlockRenderer::onRenderLevel);
     }
-
     public static void onRenderLevel(ForgeLevelRenderEvent event) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null || minecraft.player == null) {
@@ -59,6 +62,25 @@ public final class RotatedBlockRenderer {
             }
             BlockState state = rot.state();
             if (state == null || state.isAir() || state.getRenderShape() != RenderShape.MODEL) {
+                continue;
+            }
+            // Arch / ellipse voussoirs are rendered from their wedge geometry (world-space
+            // textured quads) instead of a rotated baked model - the pose stays at the
+            // world-to-camera matrix.
+            if (rot.arch() != null) {
+                poseStack.pushPose();
+                List<BakedQuad> quads = ArchGeometry.wedgeQuads(rot.arch(), state);
+                RotatedBlockRendering.renderWorldQuads(state, poseStack, NeoForgeRenderBuffer.shared(),
+                        minecraft.level, quads);
+                poseStack.popPose();
+                continue;
+            }
+            if (rot.ellipse() != null) {
+                poseStack.pushPose();
+                List<BakedQuad> quads = EllipseGeometry.wedgeQuads(rot.ellipse(), state);
+                RotatedBlockRendering.renderWorldQuads(state, poseStack, NeoForgeRenderBuffer.shared(),
+                        minecraft.level, quads);
+                poseStack.popPose();
                 continue;
             }
             // Billboard blocks always face the player (Hytale), like the placement preview.

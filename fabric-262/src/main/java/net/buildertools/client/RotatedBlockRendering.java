@@ -109,6 +109,58 @@ public final class RotatedBlockRendering {
         }
     }
 
+    /**
+     * Renders world-space quads (the arch / ellipse wedge geometry, whose vertex positions are
+     * already in world coordinates - no center/offset translation) with the same per-face shade
+     * and per-corner world light as the rotated-model path.
+     */
+    public static void renderWorldQuads(BlockState state, PoseStack poseStack, NeoForgeRenderBuffer buffer,
+                                        BlockAndTintGetter level, List<BakedQuad> quads) {
+        if (quads.isEmpty()) {
+            return;
+        }
+        QuadInstance instance = new QuadInstance();
+        instance.setOverlayCoords(OverlayTexture.NO_OVERLAY);
+        float[] normal = new float[3];
+        int[] lights = new int[4];
+        for (BakedQuad quad : quads) {
+            quadNormal(quad, normal);
+            float shade = quad.materialInfo().shade()
+                    ? smoothShade(normal[0], normal[1], normal[2]) : 1.0F;
+
+            float tr = 1.0F;
+            float tg = 1.0F;
+            float tb = 1.0F;
+            if (quad.materialInfo().isTinted()) {
+                int color = Minecraft.getInstance().getBlockColors()
+                        .getTintSource(state, quad.materialInfo().tintIndex())
+                        .colorInWorld(state, level, BlockPos.ZERO);
+                tr = ARGB.redFloat(color);
+                tg = ARGB.greenFloat(color);
+                tb = ARGB.blueFloat(color);
+            }
+
+            // Nudge each corner a hair along the face normal so the sampled cell is the one the
+            // face points into (open air for exposed faces, the wall for touching faces). The
+            // quad positions are already world coordinates.
+            for (int i = 0; i < 4; i++) {
+                double wx = quad.position(i).x() + normal[0] * LIGHT_NUDGE;
+                double wy = quad.position(i).y() + normal[1] * LIGHT_NUDGE;
+                double wz = quad.position(i).z() + normal[2] * LIGHT_NUDGE;
+                lights[i] = LightCoordsUtil.getLightCoords(
+                        level, BlockPos.containing(wx, wy, wz));
+            }
+
+            int tint = ARGB.color(255,
+                    (int) (tr * 255.0F), (int) (tg * 255.0F), (int) (tb * 255.0F));
+            for (int i = 0; i < 4; i++) {
+                instance.setColor(i, ARGB.scaleRGB(tint, shade));
+                instance.setLightCoords(i, lights[i]);
+            }
+            buffer.putBakedQuad(poseStack, quad, instance);
+        }
+    }
+
     /** World-space unit normal of the quad, computed from its (pre-rotated) geometry. */
     private static void quadNormal(BakedQuad quad, float[] out) {
         float x0 = quad.position(0).x();

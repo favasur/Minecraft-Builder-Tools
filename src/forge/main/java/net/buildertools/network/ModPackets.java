@@ -1,12 +1,14 @@
 package net.buildertools.network;
 
 import net.buildertools.BuilderToolsMod;
+import net.buildertools.network.packet.ArchPacket;
 import net.buildertools.network.packet.BlockRotationPacket;
 import net.buildertools.network.packet.EntityDeletePacket;
 import net.buildertools.network.packet.EntityDuplicatePacket;
 import net.buildertools.network.packet.EntityFreezePacket;
 import net.buildertools.network.packet.EntitySpawnPacket;
 import net.buildertools.network.packet.EntityTransformPacket;
+import net.buildertools.network.packet.EllipsePacket;
 import net.buildertools.network.packet.FreeBlockBreakPacket;
 import net.buildertools.network.packet.OffGridBlockPacket;
 import net.buildertools.network.packet.PaintPacket;
@@ -63,6 +65,8 @@ public final class ModPackets {
         register(BlockRotationPacket.class, BlockRotationPacket::encode, BlockRotationPacket::decode, BlockRotationPacket::handle);
         register(FreeBlockBreakPacket.class, FreeBlockBreakPacket::encode, FreeBlockBreakPacket::decode, FreeBlockBreakPacket::handle);
         register(RotationSyncPacket.class, RotationSyncPacket::encode, RotationSyncPacket::decode, RotationSyncPacket::handle);
+        register(ArchPacket.class, ArchPacket::encode, ArchPacket::decode, ArchPacket::handle);
+        register(EllipsePacket.class, EllipsePacket::encode, EllipsePacket::decode, EllipsePacket::handle);
     }
 
     private static int packetIdCounter = 0;

@@ -1,12 +1,14 @@
 package net.buildertools.network;
 
 import net.buildertools.BuilderToolsMod;
+import net.buildertools.network.packet.ArchPacket;
 import net.buildertools.network.packet.BlockRotationPacket;
 import net.buildertools.network.packet.EntityDeletePacket;
 import net.buildertools.network.packet.EntityDuplicatePacket;
 import net.buildertools.network.packet.EntityFreezePacket;
 import net.buildertools.network.packet.EntitySpawnPacket;
 import net.buildertools.network.packet.EntityTransformPacket;
+import net.buildertools.network.packet.EllipsePacket;
 import net.buildertools.network.packet.FreeBlockBreakPacket;
 import net.buildertools.network.packet.OffGridBlockPacket;
 import net.buildertools.network.packet.RotationSyncPacket;
@@ -47,6 +49,8 @@ public class ModPackets {
         registrar.playToServer(OffGridBlockPacket.TYPE, OffGridBlockPacket.STREAM_CODEC, OffGridBlockPacket::handle);
         registrar.playToServer(BlockRotationPacket.TYPE, BlockRotationPacket.STREAM_CODEC, BlockRotationPacket::handle);
         registrar.playToServer(FreeBlockBreakPacket.TYPE, FreeBlockBreakPacket.STREAM_CODEC, FreeBlockBreakPacket::handle);
+        registrar.playToServer(ArchPacket.TYPE, ArchPacket.STREAM_CODEC, ArchPacket::handle);
+        registrar.playToServer(EllipsePacket.TYPE, EllipsePacket.STREAM_CODEC, EllipsePacket::handle);
         registrar.playToClient(RotationSyncPacket.TYPE, RotationSyncPacket.STREAM_CODEC, RotationSyncPacket::handle);
         registrar.playToClient(SmoothTerrainTogglePacket.TYPE, SmoothTerrainTogglePacket.STREAM_CODEC, SmoothTerrainTogglePacket::handle);
         // Two-way payload (client -> server keeps the command store in sync, server -> client

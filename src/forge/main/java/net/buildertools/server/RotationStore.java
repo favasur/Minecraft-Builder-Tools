@@ -47,13 +47,13 @@ public final class RotationStore {
                 + ") yaw=" + data.yaw() + " pitch=" + data.pitch());
         RotationSavedData.of(level).set(pos, data);
         broadcast(level, new RotationSyncPacket(pos, data.state(), data.yaw(), data.pitch(), data.billboard(), false,
-                c.x, c.y, c.z));
+                c.x, c.y, c.z, data.arch(), data.ellipse()));
     }
 
     /** Removes the rotated block from a cell (its block is being broken or replaced). */
     public static void remove(ServerLevel level, BlockPos pos) {
         if (RotationSavedData.of(level).remove(pos)) {
-            broadcast(level, new RotationSyncPacket(pos, null, 0.0f, 0.0f, false, true, 0.0, 0.0, 0.0));
+            broadcast(level, new RotationSyncPacket(pos, null, 0.0f, 0.0f, false, true, 0.0, 0.0, 0.0, null, null));
         }
     }
 
@@ -63,7 +63,8 @@ public final class RotationStore {
             Vec3 c = e.getValue().center(e.getKey());
             net.buildertools.network.ModPackets.sendToPlayer(new RotationSyncPacket(
                     e.getKey(), e.getValue().state(), e.getValue().yaw(),
-                    e.getValue().pitch(), e.getValue().billboard(), false, c.x, c.y, c.z), player);
+                    e.getValue().pitch(), e.getValue().billboard(), false, c.x, c.y, c.z,
+                    e.getValue().arch(), e.getValue().ellipse()), player);
         }
     }
 
@@ -118,6 +119,22 @@ public final class RotationStore {
         BlockPos pos = e.getKey();
         RotationData data = e.getValue();
         Vec3 c = data.center(pos);
+        // Arch voussoirs ignore yaw/pitch: their broadphase box is the tight world AABB of the
+        // wedge geometry itself.
+        if (data.arch() != null) {
+            Vec3[] v = net.buildertools.util.ArchGeometry.wedgeVertices(data.arch());
+            double minX = Double.POSITIVE_INFINITY, minY = Double.POSITIVE_INFINITY, minZ = Double.POSITIVE_INFINITY;
+            double maxX = Double.NEGATIVE_INFINITY, maxY = Double.NEGATIVE_INFINITY, maxZ = Double.NEGATIVE_INFINITY;
+            for (Vec3 p : v) {
+                minX = Math.min(minX, p.x);
+                minY = Math.min(minY, p.y);
+                minZ = Math.min(minZ, p.z);
+                maxX = Math.max(maxX, p.x);
+                maxY = Math.max(maxY, p.y);
+                maxZ = Math.max(maxZ, p.z);
+            }
+            return new AABB(minX, minY, minZ, maxX, maxY, maxZ);
+        }
         AABB shape = data.state().getCollisionShape(level, pos).bounds();
         return net.buildertools.util.OffGridTransform.boxAround(
                 c.x, c.y, c.z, data.yaw(), data.pitch(), shape);

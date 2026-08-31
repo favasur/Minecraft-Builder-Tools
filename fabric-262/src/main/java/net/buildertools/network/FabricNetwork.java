@@ -1,6 +1,8 @@
 package net.buildertools.network;
 
+import net.buildertools.network.packet.ArchPacket;
 import net.buildertools.network.packet.BlockRotationPacket;
+import net.buildertools.network.packet.EllipsePacket;
 import net.buildertools.network.packet.EntityDeletePacket;
 import net.buildertools.network.packet.EntityDuplicatePacket;
 import net.buildertools.network.packet.EntityFreezePacket;
@@ -82,6 +84,8 @@ public final class FabricNetwork {
         c2s(PaintPacket.TYPE, PaintPacket.STREAM_CODEC);
         c2s(ScatterPacket.TYPE, ScatterPacket.STREAM_CODEC);
         c2s(SmoothPacket.TYPE, SmoothPacket.STREAM_CODEC);
+        c2s(ArchPacket.TYPE, ArchPacket.STREAM_CODEC);
+        c2s(EllipsePacket.TYPE, EllipsePacket.STREAM_CODEC);
         c2s(StretchPacket.TYPE, StretchPacket.STREAM_CODEC);
         c2s(UndoPacket.TYPE, UndoPacket.STREAM_CODEC);
         c2s(WorldSettingsPacket.TYPE, WorldSettingsPacket.STREAM_CODEC);
@@ -113,6 +117,8 @@ public final class FabricNetwork {
         server(PaintPacket.TYPE, PaintPacket::handle);
         server(ScatterPacket.TYPE, ScatterPacket::handle);
         server(SmoothPacket.TYPE, SmoothPacket::handle);
+        server(ArchPacket.TYPE, ArchPacket::handle);
+        server(EllipsePacket.TYPE, EllipsePacket::handle);
         server(StretchPacket.TYPE, StretchPacket::handle);
         server(UndoPacket.TYPE, UndoPacket::handle);
         server(WorldSettingsPacket.TYPE, WorldSettingsPacket::handle);

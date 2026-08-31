@@ -1,7 +1,11 @@
 package net.buildertools.mixin;
 
+import io.github.favasur.smoothterrain.collision.MeshCollisionScope;
+import io.github.favasur.smoothterrain.mesh.MeshCollisionShape;
 import net.buildertools.entity.OffGridBlockEntity;
 import net.buildertools.server.RotationStore;
+import net.buildertools.util.ArchGeometry;
+import net.buildertools.util.EllipseGeometry;
 import net.buildertools.util.OffGridTransform;
 import net.buildertools.util.RotationData;
 import net.minecraft.core.BlockPos;
@@ -50,6 +54,31 @@ public interface CollisionGetterMixin {
         for (Map.Entry<BlockPos, RotationData> e : RotationStore.getInBox(level, box)) {
             BlockPos pos = e.getKey();
             RotationData rot = e.getValue();
+            // Arch voussoirs collide against their exact wedge mesh (deterministic geometry - no
+            // baked model needed, so this works on any side). Triangle-backed shapes are valid
+            // only inside Entity#collide (the movement scope); other getBlockCollisions
+            // consumers such as suffocation and pathfinding expect ordinary VoxelShapes and
+            // would read the mesh's empty discrete grid as no collision at all.
+            if (rot.arch() != null) {
+                if (MeshCollisionScope.isEntityMovement()) {
+                    MeshCollisionShape archShape = new MeshCollisionShape(
+                            ArchGeometry.wedgeTriangles(rot.arch()));
+                    if (!archShape.isEmpty() && archShape.bounds().intersects(box)) {
+                        shapes.add(archShape);
+                    }
+                }
+                continue;
+            }
+            if (rot.ellipse() != null) {
+                if (MeshCollisionScope.isEntityMovement()) {
+                    MeshCollisionShape ellipseShape = new MeshCollisionShape(
+                            EllipseGeometry.wedgeTriangles(rot.ellipse()));
+                    if (!ellipseShape.isEmpty() && ellipseShape.bounds().intersects(box)) {
+                        shapes.add(ellipseShape);
+                    }
+                }
+                continue;
+            }
             // Prefer the block's RENDERED model as the voxelization base (stair notches, thin
             // fence posts), falling back to the collision shape when no model is available.
             VoxelShape base = OffGridTransform.modelShape(rot.state());

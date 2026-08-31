@@ -7,6 +7,8 @@ import io.github.favasur.smoothterrain.collision.MeshCollisionScope;
 import net.buildertools.collision.RotatedCollisionProvider;
 import net.buildertools.entity.OffGridBlockEntity;
 import net.buildertools.server.RotationStore;
+import net.buildertools.util.ArchGeometry;
+import net.buildertools.util.EllipseGeometry;
 import net.buildertools.util.RotationData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.SectionPos;
@@ -91,6 +93,24 @@ public interface CollisionGetterMixin {
         for (Map.Entry<BlockPos, RotationData> e : RotationStore.getInBox(level, box)) {
             BlockPos pos = e.getKey();
             RotationData rot = e.getValue();
+            // Arch / ellipse voussoirs collide against their exact wedge mesh (deterministic
+            // geometry - no baked model needed, so this works on any side).
+            if (rot.arch() != null) {
+                MeshCollisionShape archShape = new MeshCollisionShape(
+                        ArchGeometry.wedgeTriangles(rot.arch()));
+                if (!archShape.isEmpty() && archShape.bounds().intersects(box)) {
+                    shapes.add(archShape);
+                }
+                continue;
+            }
+            if (rot.ellipse() != null) {
+                MeshCollisionShape ellipseShape = new MeshCollisionShape(
+                        EllipseGeometry.wedgeTriangles(rot.ellipse()));
+                if (!ellipseShape.isEmpty() && ellipseShape.bounds().intersects(box)) {
+                    shapes.add(ellipseShape);
+                }
+                continue;
+            }
             Vec3 c = rot.center(pos);
             List<MeshCollisionShape.Tri> tris = RotatedCollisionProvider.triangles(rot, pos, level);
             MeshCollisionShape exact = tris != null

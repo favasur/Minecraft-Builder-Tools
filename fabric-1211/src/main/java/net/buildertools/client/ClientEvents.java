@@ -8,7 +8,9 @@ import net.buildertools.item.RulerToolItem;
 import net.buildertools.item.ScatterToolItem;
 import net.buildertools.item.SelectionToolItem;
 import net.buildertools.item.SmoothToolItem;
+import net.buildertools.network.packet.ArchPacket;
 import net.buildertools.network.packet.BlockRotationPacket;
+import net.buildertools.network.packet.EllipsePacket;
 import net.buildertools.network.packet.EntityDeletePacket;
 import net.buildertools.network.packet.EntityDuplicatePacket;
 import net.buildertools.network.packet.EntityFreezePacket;
@@ -156,6 +158,27 @@ public final class ClientEvents {
         } else if (item instanceof LaserToolItem) {
             event.setCanceled(true);
         } else if (item instanceof BlockItem) {
+            // Arching (ALT+A) / Ellipse (ALT+E): placements are recorded into the region and the
+            // vanilla placement proceeds untouched (no off-grid logic), so a plain box of blocks
+            // can later be arched or turned into an elliptical ring.
+            if (ArchState.isActive()) {
+                if (event.getLevel().isClientSide()) {
+                    BlockPos target = event.getPos().relative(event.getFace());
+                    if (player.level().getBlockState(target).canBeReplaced()) {
+                        ArchState.recordPlacement(target);
+                    }
+                }
+                return;
+            }
+            if (EllipseState.isActive()) {
+                if (event.getLevel().isClientSide()) {
+                    BlockPos target = event.getPos().relative(event.getFace());
+                    if (player.level().getBlockState(target).canBeReplaced()) {
+                        EllipseState.recordPlacement(target);
+                    }
+                }
+                return;
+            }
             // Off-grid placement. With R pressed the block is placed at the preview cell;
             // otherwise, clicking an off-grid block extends its rotated grid.
             if (event.getLevel().isClientSide()) {
@@ -354,6 +377,20 @@ public final class ClientEvents {
                 event.setCanceled(true);
                 applyBrush(player, target, item);
             }
+        } else if (EllipseState.isActive() && item instanceof BlockItem) {
+            if (event.getButton() == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+                // LMB click on a block turns the placed region into an elliptical ring.
+                handleEllipseLmbPress(player, minecraft, event);
+            } else if (event.getButton() == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
+                // Plain placement: let vanilla place the block; onRightClickBlock records it.
+            }
+        } else if (ArchState.isActive() && item instanceof BlockItem) {
+            if (event.getButton() == GLFW.GLFW_MOUSE_BUTTON_LEFT) {
+                // Step 3 (stretch) / step 4 (arch click) of the Arching workflow.
+                handleArchLmbPress(player, minecraft, event);
+            } else if (event.getButton() == GLFW.GLFW_MOUSE_BUTTON_RIGHT) {
+                // Plain placement: let vanilla place the block; onRightClickBlock records it.
+            }
         } else if (event.getButton() == GLFW.GLFW_MOUSE_BUTTON_LEFT && !isBuilderTool(item)
                 && !BlockRotateState.isActive()) {
             // Mine a rotated block like a normal block with ANY item (or an empty hand):
@@ -515,6 +552,22 @@ public final class ClientEvents {
             }
             return;
         }
+        if (ArchState.isDragging() && event.getButton() == GLFW.GLFW_MOUSE_BUTTON_LEFT
+                && event.getAction() == GLFW.GLFW_RELEASE) {
+            // Alt+A drag release: commit the stretch of the placed row (server remaps the
+            // blocks), then the next LMB click arches it.
+            ArchState.DragResult drag = ArchState.finishDrag();
+            Player archPlayer = Minecraft.getInstance().player;
+            if (drag != null && drag.moved()) {
+                ClientPackets.sendToServer(StretchPacket.create(drag.axis(), drag.positive(),
+                        drag.origMin(), drag.origMax(), drag.newMin(), drag.newMax(), true));
+                ArchState.updateRegion(drag.newMin(), drag.newMax());
+                if (archPlayer != null) {
+                    archPlayer.playSound(ModSounds.SET_CORNER_2.get(), 1.0f, 1.0f);
+                }
+            }
+            return;
+        }
         if (!HandleDragState.isDragging()) {
             return;
         }
@@ -548,6 +601,70 @@ public final class ClientEvents {
         long window = minecraft.getWindow().getWindow();
         return GLFW.glfwGetKey(window, GLFW.GLFW_KEY_LEFT_ALT) == GLFW.GLFW_PRESS
                 || GLFW.glfwGetKey(window, GLFW.GLFW_KEY_RIGHT_ALT) == GLFW.GLFW_PRESS;
+    }
+
+    /** Whether the Arching chord (ALT + A) is currently held. */
+    private static boolean isArchKeyDown(Minecraft minecraft) {
+        long window = minecraft.getWindow().getWindow();
+        return isAltDown(minecraft)
+                && GLFW.glfwGetKey(window, GLFW.GLFW_KEY_A) == GLFW.GLFW_PRESS;
+    }
+
+    /** Whether the Ellipse chord (ALT + E or ALT + C) is currently held. */
+    private static boolean isEllipseKeyDown(Minecraft minecraft) {
+        long window = minecraft.getWindow().getWindow();
+        return isAltDown(minecraft)
+                && (GLFW.glfwGetKey(window, GLFW.GLFW_KEY_E) == GLFW.GLFW_PRESS
+                    || GLFW.glfwGetKey(window, GLFW.GLFW_KEY_C) == GLFW.GLFW_PRESS);
+    }
+
+    /**
+     * LMB in Ellipse mode: sends the placed region plus the clicked block's face to the server,
+     * which turns it into a complete closed elliptical ring of voussoirs lying in that face's
+     * plane. The clicked face fixes the ring's orientation (vertical for a wall face, horizontal
+     * for a floor/ceiling one); the region's projected extents define its size.
+     */
+    private static void handleEllipseLmbPress(Player player, Minecraft minecraft, InputEvent.MouseButton.Pre event) {
+        HitResult hit = minecraft.hitResult;
+        if (hit == null || hit.getType() != HitResult.Type.BLOCK || !(hit instanceof BlockHitResult bhr)) {
+            return;
+        }
+        event.setCanceled(true);
+        if (EllipseState.hasRegion()) {
+            ClientPackets.sendToServer(EllipsePacket.create(
+                    EllipseState.regionMin(), EllipseState.regionMax(),
+                    bhr.getBlockPos(), bhr.getDirection()));
+        }
+        EllipseState.completeEllipse();
+        player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+    }
+
+    /**
+     * LMB in Arching mode. Before a drag: start the stretch drag on the recorded row (step 3).
+     * After a drag finished: the click arches the row relative to the clicked block's face (step
+     * 4) - the face fixes the arch's plane (the face normal is the depth), the click's height
+     * along the in-plane rise axis defines the Rise, the row defines the Span.
+     */
+    private static void handleArchLmbPress(Player player, Minecraft minecraft, InputEvent.MouseButton.Pre event) {
+        if (ArchState.phase() == ArchState.Phase.AWAIT_ARCH) {
+            HitResult hit = minecraft.hitResult;
+            if (hit != null && hit.getType() == HitResult.Type.BLOCK && hit instanceof BlockHitResult bhr) {
+                event.setCanceled(true);
+                if (ArchState.hasRegion()) {
+                    ClientPackets.sendToServer(ArchPacket.create(
+                            ArchState.regionMin(), ArchState.regionMax(),
+                            bhr.getBlockPos(), bhr.getDirection()));
+                }
+                ArchState.completeArch();
+                player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+            }
+            return;
+        }
+        if (ArchState.hasRegion()
+                && ArchState.beginDrag(player.getEyePosition(1.0f), player.getLookAngle())) {
+            event.setCanceled(true);
+            player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -655,7 +772,21 @@ public final class ClientEvents {
             return;
         }
         String[] lines = legendFor(player.getMainHandItem().getItem());
-        if (BlockRotateState.isActive()) {
+        if (ArchState.isActive()) {
+            if (ArchState.phase() == ArchState.Phase.AWAIT_ARCH) {
+                lines = new String[]{
+                        "Arch: row stretched - click a block to the left/right to arch it"};
+            } else if (ArchState.phase() == ArchState.Phase.DRAGGING) {
+                lines = new String[]{
+                        "Arch: hold LMB + move mouse to stretch the row · release to keep"};
+            } else {
+                lines = new String[]{
+                        "Arch: RMB places row blocks · LMB+drag stretches · release, then click to arch"};
+            }
+        } else if (EllipseState.isActive()) {
+            lines = new String[]{
+                    "Ellipse (Alt+E/C): RMB places region blocks · LMB on a block forms the closed ring"};
+        } else if (BlockRotateState.isActive()) {
             lines = new String[]{
                     "Off-grid: hold LMB + move mouse to rotate · RMB or Enter places · R cancels"};
         }
@@ -719,12 +850,20 @@ public final class ClientEvents {
         if (minecraft.gameMode == null || !minecraft.gameMode.hasInfiniteItems()) {
             return;
         }
-        if (minecraft.options.keyInventory.consumeClick()) {
+        // ALT+E (the Ellipse mechanic) must not open the creative settings window, so the
+        // inventory key is only consumed for the mod's screen when Alt is NOT held.
+        if (minecraft.options.keyInventory.consumeClick() && !isAltDown(minecraft)) {
             if (minecraft.player.getMainHandItem().getItem() instanceof EntityToolItem) {
                 // E with the Entity Tool held opens its Hytale-style spawn/rotate interface.
                 minecraft.setScreen(new EntityToolScreen((net.minecraft.client.player.LocalPlayer) minecraft.player));
             } else {
                 minecraft.setScreen(new CreativeSettingsScreen((net.minecraft.client.player.LocalPlayer) minecraft.player));
+            }
+        }
+        // ALT+C is the second Ellipse chord, but vanilla binds C to Save Hotbar Activator.
+        // Swallow that click while Alt is held so holding the chord never saves the hotbar.
+        if (isAltDown(minecraft)) {
+            while (minecraft.options.keySaveHotbarActivator.consumeClick()) {
             }
         }
     }
@@ -754,12 +893,39 @@ public final class ClientEvents {
 
         if (minecraft.screen != null) {
             HandleDragState.stop(false);
-
+            ArchState.end();
+            EllipseState.end();
             EntityRotateState.stop();
             BlockRotateState.stop();
             return;
         }
         ItemStack held = player.getMainHandItem();
+
+        // Arching (ALT+A held with a block in hand): enter arch mode while the chord is held,
+        // track the stretch drag every tick, and drop out when ALT+A (or the block) is released.
+        boolean archKeyHeld = isArchKeyDown(minecraft);
+        if (ArchState.isActive()) {
+            if (!archKeyHeld || !(held.getItem() instanceof BlockItem)) {
+                ArchState.end();
+            } else if (ArchState.isDragging()) {
+                ArchState.updateDrag(player.getEyePosition(1.0f), player.getLookAngle());
+            }
+        } else if (archKeyHeld && held.getItem() instanceof BlockItem) {
+            ArchState.begin();
+        }
+
+        // Ellipse (ALT+E held with a block in hand): enter ellipse mode while the chord is held,
+        // and drop out when ALT+E (or the block) is released. ALT+E takes precedence over ALT+A
+        // so the two chords cannot both be active.
+        boolean ellipseKeyHeld = isEllipseKeyDown(minecraft);
+        if (EllipseState.isActive()) {
+            if (!ellipseKeyHeld || !(held.getItem() instanceof BlockItem)) {
+                EllipseState.end();
+            }
+        } else if (ellipseKeyHeld && held.getItem() instanceof BlockItem) {
+            EllipseState.begin();
+            ArchState.end();
+        }
 
         // While a handle is being dragged, track the mouse ray against the drag plane.
         // Press/release are handled by the MouseButton events above; here the face just follows

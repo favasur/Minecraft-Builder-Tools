@@ -1,11 +1,14 @@
 package net.buildertools.server;
 
+import net.buildertools.util.ArchBlockData;
+import net.buildertools.util.EllipseBlockData;
 import net.buildertools.util.RotationData;
 import net.minecraft.commands.arguments.blocks.BlockStateParser;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.Registries;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.DoubleTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.server.level.ServerLevel;
@@ -76,9 +79,32 @@ public class RotationSavedData extends SavedData {
             if (entry.contains("cx") && entry.contains("cy") && entry.contains("cz")) {
                 center = new Vec3(entry.getDouble("cx"), entry.getDouble("cy"), entry.getDouble("cz"));
             }
+            ArchBlockData arch = null;
+            if (entry.contains("arch", Tag.TAG_LIST)) {
+                ListTag a = entry.getList("arch", Tag.TAG_DOUBLE);
+                if (a.size() >= 12) {
+                    arch = new ArchBlockData(
+                            a.getDouble(0), a.getDouble(1), a.getDouble(2),
+                            a.getDouble(3), a.getDouble(4), a.getDouble(5),
+                            a.getDouble(6), a.getDouble(7), a.getDouble(8),
+                            a.getDouble(9), a.getDouble(10), a.getDouble(11));
+                }
+            }
+            EllipseBlockData ellipse = null;
+            if (entry.contains("ellipse", Tag.TAG_LIST)) {
+                ListTag e = entry.getList("ellipse", Tag.TAG_DOUBLE);
+                if (e.size() >= 13) {
+                    ellipse = new EllipseBlockData(
+                            e.getDouble(0), e.getDouble(1), e.getDouble(2),
+                            e.getDouble(3), e.getDouble(4), e.getDouble(5),
+                            e.getDouble(6), e.getDouble(7), e.getDouble(8),
+                            e.getDouble(9), e.getDouble(10),
+                            e.getDouble(11), e.getDouble(12));
+                }
+            }
             data.rotations.put(new BlockPos((int) pos[0], (int) pos[1], (int) pos[2]),
                     new RotationData(state, entry.getFloat("yaw"), entry.getFloat("pitch"),
-                            entry.getBoolean("billboard"), center));
+                            entry.getBoolean("billboard"), center, arch, ellipse));
         }
         return data;
     }
@@ -97,6 +123,41 @@ public class RotationSavedData extends SavedData {
             entry.putDouble("cx", c.x);
             entry.putDouble("cy", c.y);
             entry.putDouble("cz", c.z);
+            ArchBlockData arch = e.getValue().arch();
+            if (arch != null) {
+                ListTag a = new ListTag();
+                a.add(DoubleTag.valueOf(arch.ox()));
+                a.add(DoubleTag.valueOf(arch.oy()));
+                a.add(DoubleTag.valueOf(arch.oz()));
+                a.add(DoubleTag.valueOf(arch.ux()));
+                a.add(DoubleTag.valueOf(arch.uy()));
+                a.add(DoubleTag.valueOf(arch.uz()));
+                a.add(DoubleTag.valueOf(arch.wx()));
+                a.add(DoubleTag.valueOf(arch.wy()));
+                a.add(DoubleTag.valueOf(arch.wz()));
+                a.add(DoubleTag.valueOf(arch.thetaStart()));
+                a.add(DoubleTag.valueOf(arch.deltaTheta()));
+                a.add(DoubleTag.valueOf(arch.radius()));
+                entry.put("arch", a);
+            }
+            EllipseBlockData ellipse = e.getValue().ellipse();
+            if (ellipse != null) {
+                ListTag el = new ListTag();
+                el.add(DoubleTag.valueOf(ellipse.cx()));
+                el.add(DoubleTag.valueOf(ellipse.cy()));
+                el.add(DoubleTag.valueOf(ellipse.cz()));
+                el.add(DoubleTag.valueOf(ellipse.ux()));
+                el.add(DoubleTag.valueOf(ellipse.uy()));
+                el.add(DoubleTag.valueOf(ellipse.uz()));
+                el.add(DoubleTag.valueOf(ellipse.wx()));
+                el.add(DoubleTag.valueOf(ellipse.wy()));
+                el.add(DoubleTag.valueOf(ellipse.wz()));
+                el.add(DoubleTag.valueOf(ellipse.a()));
+                el.add(DoubleTag.valueOf(ellipse.b()));
+                el.add(DoubleTag.valueOf(ellipse.thetaStart()));
+                el.add(DoubleTag.valueOf(ellipse.deltaTheta()));
+                entry.put("ellipse", el);
+            }
             list.add(entry);
         }
         tag.put("rotations", list);

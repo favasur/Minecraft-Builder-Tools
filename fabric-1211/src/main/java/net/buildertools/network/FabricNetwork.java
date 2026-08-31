@@ -1,11 +1,13 @@
 package net.buildertools.network;
 
+import net.buildertools.network.packet.ArchPacket;
 import net.buildertools.network.packet.BlockRotationPacket;
 import net.buildertools.network.packet.EntityDeletePacket;
 import net.buildertools.network.packet.EntityDuplicatePacket;
 import net.buildertools.network.packet.EntityFreezePacket;
 import net.buildertools.network.packet.EntitySpawnPacket;
 import net.buildertools.network.packet.EntityTransformPacket;
+import net.buildertools.network.packet.EllipsePacket;
 import net.buildertools.network.packet.FreeBlockBreakPacket;
 import net.buildertools.network.packet.OffGridBlockPacket;
 import net.buildertools.network.packet.PaintPacket;
@@ -90,6 +92,8 @@ public final class FabricNetwork {
         c2s(OffGridBlockPacket.TYPE, OffGridBlockPacket.STREAM_CODEC);
         c2s(BlockRotationPacket.TYPE, BlockRotationPacket.STREAM_CODEC);
         c2s(FreeBlockBreakPacket.TYPE, FreeBlockBreakPacket.STREAM_CODEC);
+        c2s(ArchPacket.TYPE, ArchPacket.STREAM_CODEC);
+        c2s(EllipsePacket.TYPE, EllipsePacket.STREAM_CODEC);
         c2s(SelectionSyncPacket.TYPE, SelectionSyncPacket.STREAM_CODEC);
 
         s2c(RotationSyncPacket.TYPE, RotationSyncPacket.STREAM_CODEC);
@@ -121,6 +125,8 @@ public final class FabricNetwork {
         server(OffGridBlockPacket.TYPE, OffGridBlockPacket::handle);
         server(BlockRotationPacket.TYPE, BlockRotationPacket::handle);
         server(FreeBlockBreakPacket.TYPE, FreeBlockBreakPacket::handle);
+        server(ArchPacket.TYPE, ArchPacket::handle);
+        server(EllipsePacket.TYPE, EllipsePacket::handle);
         server(SelectionSyncPacket.TYPE, SelectionSyncPacket::handle);
     }
 

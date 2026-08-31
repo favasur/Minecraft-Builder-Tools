@@ -1,7 +1,9 @@
 package net.buildertools.network;
 
 import net.buildertools.BuilderToolsMod;
+import net.buildertools.network.packet.ArchPacket;
 import net.buildertools.network.packet.BlockRotationPacket;
+import net.buildertools.network.packet.EllipsePacket;
 import net.buildertools.network.packet.EntityDeletePacket;
 import net.buildertools.network.packet.EntityDuplicatePacket;
 import net.buildertools.network.packet.EntityFreezePacket;
@@ -59,6 +61,8 @@ public class ModPackets {
             flow.add(PaintPacket.TYPE, PaintPacket.STREAM_CODEC.cast(), PaintPacket::handle);
             flow.add(ScatterPacket.TYPE, ScatterPacket.STREAM_CODEC.cast(), ScatterPacket::handle);
             flow.add(SmoothPacket.TYPE, SmoothPacket.STREAM_CODEC.cast(), SmoothPacket::handle);
+            flow.add(ArchPacket.TYPE, ArchPacket.STREAM_CODEC.cast(), ArchPacket::handle);
+            flow.add(EllipsePacket.TYPE, EllipsePacket.STREAM_CODEC.cast(), EllipsePacket::handle);
             flow.add(StretchPacket.TYPE, StretchPacket.STREAM_CODEC.cast(), StretchPacket::handle);
             flow.add(UndoPacket.TYPE, UndoPacket.STREAM_CODEC.cast(), UndoPacket::handle);
             flow.add(WorldSettingsPacket.TYPE, WorldSettingsPacket.STREAM_CODEC.cast(), WorldSettingsPacket::handle);

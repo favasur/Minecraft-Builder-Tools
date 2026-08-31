@@ -1,7 +1,9 @@
 package net.buildertools.network;
 
 import net.buildertools.BuilderToolsMod;
+import net.buildertools.network.packet.ArchPacket;
 import net.buildertools.network.packet.BlockRotationPacket;
+import net.buildertools.network.packet.EllipsePacket;
 import net.buildertools.network.packet.EntityDeletePacket;
 import net.buildertools.network.packet.EntityDuplicatePacket;
 import net.buildertools.network.packet.EntityFreezePacket;
@@ -39,6 +41,8 @@ public class ModPackets {
         registrar.playToServer(PaintPacket.TYPE, PaintPacket.STREAM_CODEC, PaintPacket::handle);
         registrar.playToServer(ScatterPacket.TYPE, ScatterPacket.STREAM_CODEC, ScatterPacket::handle);
         registrar.playToServer(SmoothPacket.TYPE, SmoothPacket.STREAM_CODEC, SmoothPacket::handle);
+        registrar.playToServer(ArchPacket.TYPE, ArchPacket.STREAM_CODEC, ArchPacket::handle);
+        registrar.playToServer(EllipsePacket.TYPE, EllipsePacket.STREAM_CODEC, EllipsePacket::handle);
         registrar.playToServer(StretchPacket.TYPE, StretchPacket.STREAM_CODEC, StretchPacket::handle);
         registrar.playToServer(UndoPacket.TYPE, UndoPacket.STREAM_CODEC, UndoPacket::handle);
         registrar.playToServer(WorldSettingsPacket.TYPE, WorldSettingsPacket.STREAM_CODEC, WorldSettingsPacket::handle);

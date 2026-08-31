@@ -3,9 +3,12 @@ package net.buildertools.client;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.buildertools.server.RotationStore;
+import net.buildertools.util.ArchGeometry;
+import net.buildertools.util.EllipseGeometry;
 import net.buildertools.util.FreeBlockRaycast;
 import net.buildertools.util.OffGridTransform;
 import net.buildertools.util.RotationData;
+import net.minecraft.client.renderer.block.model.BakedQuad;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.LevelRenderer;
 import net.minecraft.client.renderer.MultiBufferSource;
@@ -25,6 +28,7 @@ import org.joml.Matrix3f;
 import org.joml.Matrix4f;
 import org.joml.Quaternionf;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -80,6 +84,29 @@ public final class RotatedBlockRenderer {
             }
             BlockState state = rot.state();
             if (state == null || state.isAir() || state.getRenderShape() != RenderShape.MODEL) {
+                continue;
+            }
+            // Arch / ellipse voussoirs are rendered from their wedge geometry (world-space
+            // textured quads) instead of a rotated baked model - the pose stays at the
+            // world-to-camera matrix.
+            if (rot.arch() != null) {
+                poseStack.pushPose();
+                List<BakedQuad> quads = ArchGeometry.wedgeQuads(rot.arch(), state);
+                VertexConsumer archConsumer = buffers.getBuffer(
+                        net.minecraft.client.renderer.ItemBlockRenderTypes.getRenderType(state, false));
+                RotatedBlockRendering.renderWorldQuads(state, poseStack.last(), archConsumer,
+                        minecraft.level, quads);
+                poseStack.popPose();
+                continue;
+            }
+            if (rot.ellipse() != null) {
+                poseStack.pushPose();
+                List<BakedQuad> quads = EllipseGeometry.wedgeQuads(rot.ellipse(), state);
+                VertexConsumer ellipseConsumer = buffers.getBuffer(
+                        net.minecraft.client.renderer.ItemBlockRenderTypes.getRenderType(state, false));
+                RotatedBlockRendering.renderWorldQuads(state, poseStack.last(), ellipseConsumer,
+                        minecraft.level, quads);
+                poseStack.popPose();
                 continue;
             }
             // Billboard blocks always face the player (Hytale), like the placement preview.

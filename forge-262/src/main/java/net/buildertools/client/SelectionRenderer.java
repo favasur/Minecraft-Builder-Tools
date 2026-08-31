@@ -12,6 +12,8 @@ import net.buildertools.item.SelectionToolItem;
 import net.buildertools.item.SmoothToolItem;
 import net.buildertools.client.settings.BuilderSettings;
 import net.buildertools.server.RotationStore;
+import net.buildertools.util.ArchGeometry;
+import net.buildertools.util.EllipseGeometry;
 import net.buildertools.util.FullSlabsCompat;
 import net.buildertools.util.FreeBlockRaycast;
 import net.buildertools.util.OffGridTransform;
@@ -76,7 +78,6 @@ public final class SelectionRenderer {
     public static void register() {
         ForgeLevelRenderEvent.BUS.addListener(SelectionRenderer::onRenderLevel);
     }
-
     public static void onRenderLevel(ForgeLevelRenderEvent event) {
         Minecraft minecraft = Minecraft.getInstance();
         Player player = minecraft.player;
@@ -97,6 +98,31 @@ public final class SelectionRenderer {
         // builder mode), so they are drawn whenever they exist, no matter what is in the hand.
         if (SelectionManager.hasSelection()) {
             renderSelection(poseStack, buffers, item instanceof SelectionToolItem, cameraPosition);
+        }
+        // Arching (ALT+A): a bright wireframe around the recorded row so the player sees exactly
+        // which blocks will be stretched and arched (green once the stretch is done and the next
+        // click arches).
+        if (ArchState.isActive() && ArchState.hasRegion()) {
+            AABB archBox = ArchState.regionBox();
+            int archColor = ArchState.phase() == ArchState.Phase.AWAIT_ARCH
+                    ? 0xFF5AFF8A : 0xFF9AE6FF;
+            drawBox(poseStack, buffers, archBox, archColor);
+            // Once the stretch is done and the next click arches, show the ghost arch: the curve
+            // is computed live from the block + face under the crosshair (the exact input the
+            // click sends), so it morphs as the player aims and disappears when the click would
+            // fail.
+            if (ArchState.phase() == ArchState.Phase.AWAIT_ARCH) {
+                renderArchGhost(poseStack, buffers);
+            }
+        }
+        // Ellipse (ALT+E): a bright wireframe around the recorded region plus the live ghost of
+        // the elliptical voussoir band that will form inside it (computed from the block + face
+        // under the crosshair, so it morphs as the player aims and hides when the click would
+        // fail).
+        if (EllipseState.isActive() && EllipseState.hasRegion()) {
+            VertexConsumer ellipseLines = buffers.getBuffer(RenderTypes.lines());
+            drawBox(poseStack, buffers, EllipseState.regionBox(), 0xFF9AE6FF);
+            renderEllipseGhost(poseStack, ellipseLines);
         }
         if (SelectionManager.hasSelectedEntity()) {
             renderEntity(poseStack, buffers);
@@ -574,6 +600,155 @@ public final class SelectionRenderer {
             LaserState.update(pos, distance);
             player.sendOverlayMessage(Component.literal(String.format(Locale.ROOT,
                     "Laser: %.1f blocks", distance)));
+        }
+    }
+
+    /**
+     * Ghost preview of the arch the next LMB click will commit: the arch is derived from the
+     * stretched region and the block + face currently under the crosshair (the same input the
+     * click sends, via {@link ArchGeometry#regionArch}), and the curve is drawn over the row -
+     * a bright centerline, dim outer/inner edges of the 1m-thick band, and a dim Rise marker
+     * from the chord to the apex. Nothing is drawn when the current aim cannot form an arch, so
+     * the player sees exactly what the click would generate before committing.
+     */
+    private static void renderArchGhost(PoseStack poseStack, NeoForgeRenderBuffer buffers) {
+        HitResult hit = Minecraft.getInstance().hitResult;
+        if (hit == null || hit.getType() != HitResult.Type.BLOCK || !(hit instanceof BlockHitResult bhr)) {
+            return;
+        }
+        ArchGeometry.RegionArch ra = ArchGeometry.regionArch(
+                ArchState.regionMin(), ArchState.regionMax(), bhr.getBlockPos(), bhr.getDirection());
+        if (ra == null) {
+            return;
+        }
+        ArchGeometry.ArchResult arch = ra.arch();
+        Vec3 u = arch.u();
+        Vec3 w = arch.w();
+        Vec3 o = arch.origin();
+        // The depth axis: the server commits one row of voussoirs per wall column offset along v,
+        // so the preview draws the same arc shifted to every column the region occupies - a
+        // multi-wide wall shows its full curved band instead of just the centerline.
+        Vec3 v = u.cross(w);
+        double t0 = arch.thetaStart();
+        double t1 = t0 - arch.totalAngle();
+        VertexConsumer lines = buffers.getBuffer(RenderTypes.lines());
+        int bright = 0xFF5AFF8A;
+        int dim = 0x805AFF8A;
+        int colMin = archColumn(ArchState.regionMin(), ArchState.regionMax(), ra.center(), v, true);
+        int colMax = archColumn(ArchState.regionMin(), ArchState.regionMax(), ra.center(), v, false);
+        for (int col = colMin; col <= colMax; col++) {
+            Vec3 co = o.add(v.scale(col));
+            drawArc(poseStack, lines, co, u, w, arch.radius(), t0, t1, bright);
+            drawArc(poseStack, lines, co, u, w, arch.radius() + 0.5, t0, t1, dim);
+            drawArc(poseStack, lines, co, u, w, arch.radius() - 0.5, t0, t1, dim);
+        }
+        // Rise marker: from the chord midpoint to the apex of the centerline.
+        Vec3 apex = o.add(w.scale(arch.radius()));
+        drawLine(poseStack, lines, ra.center(), apex, dim);
+    }
+
+    /** The lowest (or highest) column index along the arch's depth axis ({@code v}) among the
+     *  region's cell centres - the per-column offsets the server commits
+     *  ({@code round((cellCenter - boxCenter)·v)}). */
+    private static int archColumn(BlockPos min, BlockPos max, Vec3 center, Vec3 v, boolean lowest) {
+        double best = lowest ? Double.POSITIVE_INFINITY : Double.NEGATIVE_INFINITY;
+        for (int dx = 0; dx <= 1; dx++) {
+            for (int dy = 0; dy <= 1; dy++) {
+                for (int dz = 0; dz <= 1; dz++) {
+                    BlockPos corner = new BlockPos(min.getX() + dx * (max.getX() - min.getX()),
+                            min.getY() + dy * (max.getY() - min.getY()),
+                            min.getZ() + dz * (max.getZ() - min.getZ()));
+                    double d = Vec3.atCenterOf(corner).subtract(center).dot(v);
+                    best = lowest ? Math.min(best, d) : Math.max(best, d);
+                }
+            }
+        }
+        return (int) Math.round(best);
+    }
+
+    /**
+     * Ghost preview of the elliptical ring the next LMB click will commit (ALT+E): the ring is
+     * derived from the placed region and the block + face currently under the crosshair (the same
+     * input the click sends, via {@link EllipseGeometry#regionEllipse}), and the voussoir band is
+     * drawn in the clicked face's plane - a bright centerline and dim outer/inner edges (the
+     * 0.5m radial offset along the ellipse normal), repeated for every depth layer of the wall.
+     * Nothing is drawn when the current aim cannot form a ring, so the player sees exactly what
+     * the click would generate before committing.
+     */
+    private static void renderEllipseGhost(PoseStack poseStack, VertexConsumer lines) {
+        HitResult hit = Minecraft.getInstance().hitResult;
+        if (hit == null || hit.getType() != HitResult.Type.BLOCK || !(hit instanceof BlockHitResult bhr)) {
+            return;
+        }
+        EllipseGeometry.RegionEllipse re = EllipseGeometry.regionEllipse(
+                EllipseState.regionMin(), EllipseState.regionMax(), bhr.getBlockPos(), bhr.getDirection());
+        if (re == null) {
+            return;
+        }
+        EllipseGeometry.EllipseResult e = re.ellipse();
+        int bright = 0xFF5AFF8A;
+        int dim = 0x805AFF8A;
+        double[] thetas = e.thetas();
+        for (int layer = 0; layer < re.layers(); layer++) {
+            double layerOff = layer - (re.layers() - 1) / 2.0;
+            Vec3 c = e.center().add(e.v().scale(layerOff));
+            drawEllipseCurve(poseStack, lines, c, e.u(), e.w(), e.a(), e.b(), thetas, bright);
+            drawEllipseBand(poseStack, lines, c, e.u(), e.w(), e.a(), e.b(), thetas, dim);
+        }
+    }
+
+    /** Draws one closed ellipse curve (centerline at semi-axes {@code a}/{@code b}) sampled at
+     *  the ring's actual wedge boundaries, so the preview shows the exact voussoir segmentation
+     *  the commit makes. */
+    private static void drawEllipseCurve(PoseStack poseStack, VertexConsumer lines, Vec3 c, Vec3 u, Vec3 w,
+                                         double a, double b, double[] thetas, int color) {
+        Vec3 prev = null;
+        for (double t : thetas) {
+            Vec3 p = c.add(u.scale(a * Math.cos(t))).add(w.scale(b * Math.sin(t)));
+            if (prev != null) {
+                drawLine(poseStack, lines, prev, p, color);
+            }
+            prev = p;
+        }
+    }
+
+    /** Draws the outer and inner edges of the 1m-thick band: the centerline offset 0.5m along
+     *  the outward ellipse normal ({@code (b cos t, a sin t)} normalized), which is exactly how
+     *  the voussoir corners are placed. */
+    private static void drawEllipseBand(PoseStack poseStack, VertexConsumer lines, Vec3 c, Vec3 u, Vec3 w,
+                                        double a, double b, double[] thetas, int color) {
+        Vec3 prevOuter = null;
+        Vec3 prevInner = null;
+        for (double t : thetas) {
+            double nx = b * Math.cos(t);
+            double ny = a * Math.sin(t);
+            double len = Math.sqrt(nx * nx + ny * ny);
+            Vec3 n = len < 1.0E-9 ? w : u.scale(nx / len).add(w.scale(ny / len));
+            Vec3 p = c.add(u.scale(a * Math.cos(t))).add(w.scale(b * Math.sin(t)));
+            Vec3 outer = p.add(n.scale(0.5));
+            Vec3 inner = p.subtract(n.scale(0.5));
+            if (prevOuter != null) {
+                drawLine(poseStack, lines, prevOuter, outer, color);
+                drawLine(poseStack, lines, prevInner, inner, color);
+            }
+            prevOuter = outer;
+            prevInner = inner;
+        }
+    }
+
+    /** Samples one circular arc in the u/w plane around origin {@code o} at radius {@code r},
+     *  from angle {@code t0} down to {@code t1}, as line segments. */
+    private static void drawArc(PoseStack poseStack, VertexConsumer lines, Vec3 o, Vec3 u, Vec3 w,
+                                double r, double t0, double t1, int color) {
+        int segments = 64;
+        Vec3 prev = null;
+        for (int i = 0; i <= segments; i++) {
+            double t = t0 + (t1 - t0) * i / segments;
+            Vec3 p = o.add(u.scale(r * Math.cos(t))).add(w.scale(r * Math.sin(t)));
+            if (prev != null) {
+                drawLine(poseStack, lines, prev, p, color);
+            }
+            prev = p;
         }
     }
 

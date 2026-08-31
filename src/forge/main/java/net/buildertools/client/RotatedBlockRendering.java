@@ -62,6 +62,95 @@ public final class RotatedBlockRendering {
         renderQuads(model, state, pos, center, offset, pose, consumer, level, random, null);
     }
 
+    /**
+     * Renders quads whose vertex positions are already WORLD space (the arch wedge geometry): no
+     * center/offset translation - the pose is the plain world-to-camera matrix - and the light is
+     * sampled at each vertex's actual world position. Shading, tint and world-space normals work
+     * exactly like {@link #render}.
+     */
+    public static void renderWorldQuads(BlockState state, PoseStack.Pose pose, VertexConsumer consumer,
+                                        BlockAndTintGetter level, List<BakedQuad> quads) {
+        renderQuadList(state, BlockPos.ZERO, Vec3.ZERO, Vec3.ZERO, pose, consumer, level, quads, true);
+    }
+
+    private static void renderQuadList(BlockState state, BlockPos pos, Vec3 center, Vec3 offset,
+                                       PoseStack.Pose pose, VertexConsumer consumer,
+                                       BlockAndTintGetter level, List<BakedQuad> quads,
+                                       boolean worldSpace) {
+        if (quads.isEmpty()) {
+            return;
+        }
+        float[] normal = new float[3];
+        int[] lights = new int[4];
+        for (BakedQuad quad : quads) {
+            quadNormal(quad, normal);
+            float shade = quad.isShade() ? smoothShade(normal[0], normal[1], normal[2]) : 1.0F;
+
+            float tr = 1.0F;
+            float tg = 1.0F;
+            float tb = 1.0F;
+            if (quad.isTinted()) {
+                int color = Minecraft.getInstance().getBlockColors()
+                        .getColor(state, level, pos, quad.getTintIndex());
+                tr = (float) (color >> 16 & 255) / 255.0F;
+                tg = (float) (color >> 8 & 255) / 255.0F;
+                tb = (float) (color & 255) / 255.0F;
+            }
+
+            int[] v = quad.getVertices();
+            for (int i = 0; i < 4; i++) {
+                int o = i * 8;
+                // Nudge the corner a hair along the face normal so the sampled cell is the one
+                // the face points into (open air for exposed faces, the wall for touching faces).
+                double wx;
+                double wy;
+                double wz;
+                if (worldSpace) {
+                    wx = Float.intBitsToFloat(v[o]) + normal[0] * LIGHT_NUDGE;
+                    wy = Float.intBitsToFloat(v[o + 1]) + normal[1] * LIGHT_NUDGE;
+                    wz = Float.intBitsToFloat(v[o + 2]) + normal[2] * LIGHT_NUDGE;
+                } else {
+                    wx = center.x - 0.5 + offset.x + Float.intBitsToFloat(v[o])
+                            + normal[0] * LIGHT_NUDGE;
+                    wy = center.y - 0.5 + offset.y + Float.intBitsToFloat(v[o + 1])
+                            + normal[1] * LIGHT_NUDGE;
+                    wz = center.z - 0.5 + offset.z + Float.intBitsToFloat(v[o + 2])
+                            + normal[2] * LIGHT_NUDGE;
+                }
+                lights[i] = LevelRenderer.getLightColor(level, state, BlockPos.containing(wx, wy, wz));
+            }
+
+            // Emit the vertex fields directly instead of using VertexConsumer#putBulkData:
+            // putBulkData reconstructs the normal from BakedQuad#getDirection (an axis-snapped
+            // value), which would give an arbitrarily oriented wedge face a wrong normal. This
+            // path keeps the exact world-space normal and lightmap stable.
+            for (int i = 0; i < 4; i++) {
+                int o = i * 8;
+                int packedColor = v[o + 3];
+                float vr = ((packedColor >> 16) & 0xFF) / 255.0F;
+                float vg = ((packedColor >> 8) & 0xFF) / 255.0F;
+                float vb = (packedColor & 0xFF) / 255.0F;
+                float va = ((packedColor >>> 24) & 0xFF) / 255.0F;
+                int light = combineLight(lights[i], v[o + 6]);
+                consumer.addVertex(pose,
+                                Float.intBitsToFloat(v[o]),
+                                Float.intBitsToFloat(v[o + 1]),
+                                Float.intBitsToFloat(v[o + 2]))
+                        .setColor(vr * shade * tr, vg * shade * tg, vb * shade * tb, va)
+                        .setUv(Float.intBitsToFloat(v[o + 4]), Float.intBitsToFloat(v[o + 5]))
+                        .setOverlay(OverlayTexture.NO_OVERLAY)
+                        .setLight(light)
+                        .setNormal(pose, normal[0], normal[1], normal[2]);
+            }
+        }
+    }
+
+    private static int combineLight(int sampled, int baked) {
+        int block = Math.max(sampled & 0xFFFF, baked & 0xFFFF);
+        int sky = Math.max((sampled >>> 16) & 0xFFFF, (baked >>> 16) & 0xFFFF);
+        return block | (sky << 16);
+    }
+
     private static void renderQuads(BakedModel model, BlockState state, BlockPos pos, Vec3 center,
                                     Vec3 offset, PoseStack.Pose pose, VertexConsumer consumer,
                                     BlockAndTintGetter level, RandomSource random, Direction direction) {

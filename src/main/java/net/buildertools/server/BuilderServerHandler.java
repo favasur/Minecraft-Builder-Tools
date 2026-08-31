@@ -1,5 +1,10 @@
 package net.buildertools.server;
 
+import net.buildertools.util.ArchBlockData;
+import net.buildertools.util.ArchGeometry;
+import net.buildertools.util.EllipseBlockData;
+import net.buildertools.util.EllipseGeometry;
+import net.buildertools.util.FaceFrame;
 import net.buildertools.util.OffGridTransform;
 import net.buildertools.flexiblepainting.api.FlexiblePaintingAccess;
 import net.buildertools.util.RotationData;
@@ -137,6 +142,29 @@ public final class BuilderServerHandler {
     }
 
     /**
+     * Arching stretch (ALT+A + LMB drag): the same rubber-sheet remap as the Selection-tool
+     * stretch, but for the placed row tracked by Arching. Unlike {@link #stretchSelection} it
+     * does NOT move the Selection tool's stored region - the row lives only in the client's
+     * Arching state.
+     */
+    public static void archStretch(ServerPlayer player, int axis, boolean positive,
+                                   BlockPos origMin, BlockPos origMax, BlockPos newMin, BlockPos newMax) {
+        if (axis < 0 || axis > 2 || origMin == null || origMax == null || newMin == null || newMax == null) {
+            sendError(player, "Invalid stretch parameters.");
+            return;
+        }
+        BlockPos oMin = new BlockPos(Math.min(origMin.getX(), origMax.getX()), Math.min(origMin.getY(), origMax.getY()), Math.min(origMin.getZ(), origMax.getZ()));
+        BlockPos oMax = new BlockPos(Math.max(origMin.getX(), origMax.getX()), Math.max(origMin.getY(), origMax.getY()), Math.max(origMin.getZ(), origMax.getZ()));
+        BlockPos nMin = new BlockPos(Math.min(newMin.getX(), newMax.getX()), Math.min(newMin.getY(), newMax.getY()), Math.min(newMin.getZ(), newMax.getZ()));
+        BlockPos nMax = new BlockPos(Math.max(newMin.getX(), newMax.getX()), Math.max(newMin.getY(), newMax.getY()), Math.max(newMin.getZ(), newMax.getZ()));
+        int stretched = applyStretch(player, player.level(), axis, positive, oMin, oMax, nMin, nMax);
+        if (stretched < 0) {
+            return;
+        }
+        playSound(player, ModSounds.FILL.get());
+    }
+
+    /**
      * Alt+drag stretch: remaps the selection's blocks proportionally along the dragged axis
      * (rubber-sheet style), filling the new region. The face opposite the dragged one stays put;
      * content is scaled between it and the dragged face, so stretching duplicates blocks and
@@ -185,6 +213,58 @@ public final class BuilderServerHandler {
         int oExtent = Math.abs(oDrag - fixed);
         int nExtent = Math.abs(nDrag - fixed);
 
+        int stretched = applyStretch(player, level, axis, positive, oMin, oMax, nMin, nMax);
+        if (stretched < 0) {
+            return;
+        }
+        // Keep the region (and the client's selection box) at the new size.
+        SelectionStore.setRegion(player, nMin, nMax);
+        player.connection.send(new SelectionSyncPacket(
+                true, nMin.getX(), nMin.getY(), nMin.getZ(), nMax.getX(), nMax.getY(), nMax.getZ()));
+        sendMessage(player, "Stretched " + stretched + " block(s).");
+        playSound(player, ModSounds.FILL.get());
+    }
+
+    /**
+     * The shared rubber-sheet remap behind the Selection-tool stretch and the Arching stretch:
+     * remaps the blocks of the union of the original and new regions proportionally along
+     * {@code axis} between the fixed face and the dragged face (stretching duplicates blocks,
+     * compressing trims them). Returns the number of blocks touched, or -1 when the operation is
+     * invalid (the caller reports the error). Does NOT touch the selection store - the Selection
+     * tool path reports its own region sync after calling this.
+     */
+    private static int applyStretch(ServerPlayer player, Level level, int axis, boolean positive,
+                                    BlockPos oMin, BlockPos oMax, BlockPos nMin, BlockPos nMax) {
+        BlockPos uMin = new BlockPos(
+                Math.min(oMin.getX(), nMin.getX()), Math.min(oMin.getY(), nMin.getY()), Math.min(oMin.getZ(), nMin.getZ()));
+        BlockPos uMax = new BlockPos(
+                Math.max(oMax.getX(), nMax.getX()), Math.max(oMax.getY(), nMax.getY()), Math.max(oMax.getZ(), nMax.getZ()));
+
+        long volume = (long) (uMax.getX() - uMin.getX() + 1)
+                * (uMax.getY() - uMin.getY() + 1)
+                * (uMax.getZ() - uMin.getZ() + 1);
+        if (volume > MAX_BLOCKS) {
+            sendError(player, "Selection is too large (max " + MAX_BLOCKS + " blocks).");
+            return -1;
+        }
+        if (!level.hasChunksAt(uMin, uMax)) {
+            sendError(player, "Selection is not fully loaded.");
+            return -1;
+        }
+        if (player.distanceToSqr(Vec3.atCenterOf(uMin)) > MAX_DISTANCE * MAX_DISTANCE
+                || player.distanceToSqr(Vec3.atCenterOf(uMax)) > MAX_DISTANCE * MAX_DISTANCE) {
+            sendError(player, "Selection is too far away (max " + (int) MAX_DISTANCE + " blocks).");
+            return -1;
+        }
+
+        // The opposite face of the dragged one stays fixed; content is scaled from it toward the
+        // dragged face's new position.
+        int fixed = positive ? coord(oMin, axis) : coord(oMax, axis);
+        int oDrag = positive ? coord(oMax, axis) : coord(oMin, axis);
+        int nDrag = positive ? coord(nMax, axis) : coord(nMin, axis);
+        int oExtent = Math.abs(oDrag - fixed);
+        int nExtent = Math.abs(nDrag - fixed);
+
         List<BlockChange> changes = new ArrayList<>();
         for (BlockPos pos : BlockPos.betweenClosed(uMin, uMax)) {
             BlockPos p = pos.immutable();
@@ -215,12 +295,7 @@ public final class BuilderServerHandler {
         }
 
         UndoStore.push(player, changes);
-        // Keep the region (and the client's selection box) at the new size.
-        SelectionStore.setRegion(player, nMin, nMax);
-        player.connection.send(new SelectionSyncPacket(
-                true, nMin.getX(), nMin.getY(), nMin.getZ(), nMax.getX(), nMax.getY(), nMax.getZ()));
-        sendMessage(player, "Stretched " + changes.size() + " block(s).");
-        playSound(player, ModSounds.FILL.get());
+        return changes.size();
     }
 
     /** Returns the given axis coordinate of a position (0=x, 1=y, 2=z). */
@@ -239,6 +314,349 @@ public final class BuilderServerHandler {
             case 1 -> new BlockPos(pos.getX(), value, pos.getZ());
             default -> new BlockPos(pos.getX(), pos.getY(), value);
         };
+    }
+
+    // ------------------------------------------------------------------
+    // Arching (ALT+A): turn a stretched row of blocks into an arch of voussoirs
+    // ------------------------------------------------------------------
+
+    /**
+     * Arching (step 4 of the ALT+A workflow): after the player placed a wall (a straight box of
+     * blocks) and stretched it (ALT+A + LMB drag), the client sends the stretched region plus the
+     * cell and FACE they clicked to the side of it. The clicked face fixes the arch's frame: the
+     * face normal is the arch's depth axis (so a wall face gives a vertical arch, a floor/ceiling
+     * face a sideways one), the region's larger projected extent in the face plane is the Span
+     * {@code S}, and the click's offset along the in-plane rise direction is the Rise {@code H};
+     * the arch radius is {@code R = H/2 + S^2/(8H)}. Every column of the wall (each 1-wide strip
+     * along the span) becomes a row of tapered voussoir wedges, and any extra thickness becomes
+     * concentric radial layers, so the whole box turns into a curved band with no gaps. The
+     * wedges live in the mod's block layer, replacing the vanilla box (whose cells become air).
+     * Undo restores the box and removes the wedges.
+     */
+    public static void archBlocks(ServerPlayer player, BlockPos corner1, BlockPos corner2,
+                                  BlockPos click, Direction face) {
+        BlockPos min = new BlockPos(
+                Math.min(corner1.getX(), corner2.getX()), Math.min(corner1.getY(), corner2.getY()), Math.min(corner1.getZ(), corner2.getZ()));
+        BlockPos max = new BlockPos(
+                Math.max(corner1.getX(), corner2.getX()), Math.max(corner1.getY(), corner2.getY()), Math.max(corner1.getZ(), corner2.getZ()));
+        if (click == null || face == null) {
+            sendError(player, "Invalid arch click.");
+            return;
+        }
+        if (player.distanceToSqr(Vec3.atCenterOf(click)) > MAX_DISTANCE * MAX_DISTANCE) {
+            sendError(player, "The arch target is too far away (max " + (int) MAX_DISTANCE + " blocks).");
+            return;
+        }
+
+        int ex = max.getX() - min.getX();
+        int ey = max.getY() - min.getY();
+        int ez = max.getZ() - min.getZ();
+        long volume = (long) (ex + 1) * (ey + 1) * (ez + 1);
+        if (volume > MAX_BLOCKS) {
+            sendError(player, "Arch: the wall is too large (max " + MAX_BLOCKS + " blocks).");
+            return;
+        }
+
+        ServerLevel level = player.serverLevel();
+        if (!level.hasChunksAt(min, max)) {
+            sendError(player, "The arch wall is not fully loaded.");
+            return;
+        }
+        if (player.distanceToSqr(Vec3.atCenterOf(min)) > MAX_DISTANCE * MAX_DISTANCE
+                || player.distanceToSqr(Vec3.atCenterOf(max)) > MAX_DISTANCE * MAX_DISTANCE) {
+            sendError(player, "The arch wall is too far away (max " + (int) MAX_DISTANCE + " blocks).");
+            return;
+        }
+
+        // Every cell of the box must hold a solid block (gaps mean the player never stretched the
+        // wall - the stretch fills it). Check before changing anything.
+        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            if (level.getBlockState(pos).isAir()) {
+                sendError(player, "Arch: the wall has gaps - stretch it first to fill them.");
+                return;
+            }
+        }
+
+        // The clicked face fixes the arch's frame: the face normal is the depth axis (v), and the
+        // face plane holds the span (u) and the rise (w). The span follows the region's larger
+        // projected extent in the face plane, so the arch aligns with the wall however it was
+        // built; the click's offset along w from the chord is the Rise (the chord passes through
+        // the two span-end cells at the region's centre). This derivation is shared with the
+        // client's ghost preview (ArchGeometry.regionArch) so the curve shown while aiming is
+        // exactly what this click commits.
+        ArchGeometry.RegionArch ra = ArchGeometry.regionArch(min, max, click, face);
+        if (ra == null) {
+            sendError(player, "Arch: click a block's face clearly to the side of the wall to set the arch height.");
+            return;
+        }
+        ArchGeometry.ArchResult arch = ra.arch();
+        int count = ra.count();
+        double span = ra.span();
+        Vec3 center = ra.center();
+
+        // Radial layers: cells offset along w get their own centerline radius R + layer. Only a
+        // wall with real thickness can collapse its innermost layer (a wedge whose inner arc
+        // would invert); a plain 1-wide row has no layers and keeps its exact pre-wall arch
+        // behaviour even for very tight arches.
+        Vec3 v = arch.u().cross(arch.w());
+        int maxAbsLayer = 0;
+        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            maxAbsLayer = Math.max(maxAbsLayer,
+                    Math.abs((int) Math.round(Vec3.atCenterOf(pos).subtract(center).dot(arch.w()))));
+        }
+        if (maxAbsLayer > 0 && arch.radius() - maxAbsLayer - 0.5 < 0.5) {
+            sendError(player, "Arch: the wall is too thick for this arch height - click farther from the wall (more rise) or shorten the span.");
+            return;
+        }
+
+        List<BlockChange> changes = new ArrayList<>();
+        int half = (count - 1) / 2;
+        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            BlockPos cell = pos.immutable();
+            Vec3 offset = Vec3.atCenterOf(cell).subtract(center);
+            int i = Math.max(0, Math.min(count - 1, (int) Math.round(offset.dot(arch.u())) + half));
+            int wLayer = (int) Math.round(offset.dot(arch.w()));
+            int vCol = (int) Math.round(offset.dot(v));
+
+            // The wedge keeps the cell's exact block state (its texture, slab half, stair shape...).
+            RotationData layer = RotationStore.get(level, cell);
+            BlockState state = layer != null ? layer.state() : level.getBlockState(cell);
+            ArchBlockData base = ArchGeometry.blockData(arch, i, count);
+            // Offset the wedge into its depth column (shift the circle center along v) and radial
+            // layer (its own centerline radius), so columns and layers tile without gaps.
+            ArchBlockData data = new ArchBlockData(
+                    base.ox() + v.x * vCol, base.oy() + v.y * vCol, base.oz() + v.z * vCol,
+                    base.ux(), base.uy(), base.uz(),
+                    base.wx(), base.wy(), base.wz(),
+                    base.thetaStart(), base.deltaTheta(), base.radius() + wLayer);
+            Vec3 wedgeCenter = ArchGeometry.wedgeCenter(data);
+            // Undo must restore this cell's vanilla block AND remove the wedge the arch puts into
+            // the layer keyed by this cell.
+            changes.add(capture(level, cell, cell));
+            level.setBlock(cell, Blocks.AIR.defaultBlockState(), 3);
+            if (layer != null) {
+                RotationStore.remove(level, cell);
+            }
+            RotationStore.set(level, cell, new RotationData(state, 0.0f, 0.0f, false, wedgeCenter, data, null));
+        }
+
+        UndoStore.push(player, changes);
+        sendMessage(player, "Arched " + changes.size() + " block(s) (span " + (count - 1) + "m).");
+        playSound(player, ModSounds.FILL.get());
+    }
+
+    // ------------------------------------------------------------------
+    // Ellipse (ALT+E): turn the placed region into a closed elliptical ring
+    // ------------------------------------------------------------------
+
+    /**
+     * Ellipse (the ALT+E mechanic): the placed region becomes a complete, closed loop of tapered
+     * voussoirs lying in the plane of the clicked block face. The face's in-plane axes are the
+     * ring's semi-axes - the region's projected cell-center extents give {@code a} and
+     * {@code b} so the ring's outer edge sits flush with the region's faces - and the region's
+     * thickness along the face normal is the ring's depth: each depth cell becomes a concentric
+     * ring layer. Every voussoir is ~1m wide at the centerline (the ring is split into equal
+     * arc-length steps, {@code N = round(perimeter)}), so the loop tiles with no gaps. The wedges
+     * live in the mod's block layer, replacing the region's vanilla blocks (whose cells become
+     * air). Undo restores the region and removes the wedges.
+     */
+    public static void ellipseBlocks(ServerPlayer player, BlockPos corner1, BlockPos corner2,
+                                     BlockPos click, Direction face) {
+        BlockPos min = new BlockPos(
+                Math.min(corner1.getX(), corner2.getX()), Math.min(corner1.getY(), corner2.getY()), Math.min(corner1.getZ(), corner2.getZ()));
+        BlockPos max = new BlockPos(
+                Math.max(corner1.getX(), corner2.getX()), Math.max(corner1.getY(), corner2.getY()), Math.max(corner1.getZ(), corner2.getZ()));
+        if (click == null || face == null) {
+            sendError(player, "Invalid ellipse click.");
+            return;
+        }
+        if (player.distanceToSqr(Vec3.atCenterOf(click)) > MAX_DISTANCE * MAX_DISTANCE) {
+            sendError(player, "The ellipse target is too far away (max " + (int) MAX_DISTANCE + " blocks).");
+            return;
+        }
+        if (player.distanceToSqr(Vec3.atCenterOf(min)) > MAX_DISTANCE * MAX_DISTANCE
+                || player.distanceToSqr(Vec3.atCenterOf(max)) > MAX_DISTANCE * MAX_DISTANCE) {
+            sendError(player, "The ellipse region is too far away (max " + (int) MAX_DISTANCE + " blocks).");
+            return;
+        }
+
+        int ex = max.getX() - min.getX();
+        int ey = max.getY() - min.getY();
+        int ez = max.getZ() - min.getZ();
+        long volume = (long) (ex + 1) * (ey + 1) * (ez + 1);
+        if (volume > MAX_BLOCKS) {
+            sendError(player, "Ellipse: the region is too large (max " + MAX_BLOCKS + " blocks).");
+            return;
+        }
+
+        ServerLevel level = player.serverLevel();
+        if (!level.hasChunksAt(min, max)) {
+            sendError(player, "The ellipse region is not fully loaded.");
+            return;
+        }
+
+        // The clicked face fixes the ring's frame: the face plane holds the ring (u = right,
+        // w = up), the face normal is the depth (v). The region's projected cell-center extents
+        // give the semi-axes a/b and the number of depth layers.
+        FaceFrame frame = FaceFrame.of(click, face);
+        Vec3 u = frame.right();
+        Vec3 w = frame.up();
+        double extentU = cellExtent(min, max, u);
+        double extentW = cellExtent(min, max, w);
+        if (extentU < 1.0 || extentW < 1.0) {
+            sendError(player, "Ellipse: the region needs at least 2 blocks in two directions.");
+            return;
+        }
+        double a = extentU / 2.0;
+        double b = extentW / 2.0;
+
+        // Every cell of the region must be solid (the workflow: place the wall, then hit ALT+E).
+        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            if (level.getBlockState(pos).isAir()) {
+                sendError(player, "Ellipse: the wall has gaps - fill them first.");
+                return;
+            }
+        }
+
+        // The 1m-thick ring must be able to close: the inner edge (offset 0.5m inward) needs
+        // positive semi-axes and its curvature at the tips (b^2/a) must stay above the pinch
+        // limit, or adjacent voussoirs would cross at the narrow ends.
+        if (a - 0.5 < 0.5 || b - 0.5 < 0.5) {
+            sendError(player, "Ellipse: the region is too narrow to form a ring - make it at least 2 blocks in both directions.");
+            return;
+        }
+        if (b * b / a < EllipseGeometry.MIN_CURVATURE) {
+            sendError(player, "Ellipse: the region is too flat for a closed ring - make it wider or taller.");
+            return;
+        }
+
+        // The ring geometry itself (centerline semi-axes, depth layers, arc-length segmentation)
+        // comes from the shared derivation, so the commit and the client's ghost preview always
+        // agree.
+        EllipseGeometry.RegionEllipse re = EllipseGeometry.regionEllipse(min, max, click, face);
+        if (re == null) {
+            sendError(player, "Ellipse: the region cannot form a ring.");
+            return;
+        }
+        EllipseGeometry.EllipseResult ellipse = re.ellipse();
+        Vec3 v = ellipse.v();
+        int layers = re.layers();
+
+        // Split the ring into segments: consecutive voussoirs that land in the same cell merge
+        // into one wider wedge (the layer is keyed by cell, so two wedges cannot share a cell).
+        // The segment structure is identical for every layer (layers only shift the depth).
+        int count = ellipse.count();
+        List<EllipseGeometry.Segment> segs = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            EllipseBlockData d = EllipseGeometry.blockData(ellipse, i, 0);
+            BlockPos cell = cellOf(EllipseGeometry.wedgeCenter(d));
+            if (!segs.isEmpty() && segs.get(segs.size() - 1).cell().equals(cell)) {
+                EllipseGeometry.Segment last = segs.remove(segs.size() - 1);
+                segs.add(new EllipseGeometry.Segment(EllipseGeometry.extend(last.data(), d.deltaTheta()), cell));
+            } else {
+                segs.add(new EllipseGeometry.Segment(d, cell));
+            }
+        }
+        // Wrap-around: the last wedge and the first wedge are adjacent across 2*pi. When they
+        // landed in the same tip cell they must merge into one wedge spanning the seam.
+        if (segs.size() > 1) {
+            EllipseGeometry.Segment first = segs.get(0);
+            EllipseGeometry.Segment last = segs.get(segs.size() - 1);
+            if (last.cell().equals(first.cell())) {
+                segs.remove(segs.size() - 1);
+                EllipseBlockData d = first.data();
+                EllipseBlockData merged = new EllipseBlockData(
+                        d.cx(), d.cy(), d.cz(),
+                        d.ux(), d.uy(), d.uz(),
+                        d.wx(), d.wy(), d.wz(),
+                        d.a(), d.b(),
+                        last.data().thetaStart(),
+                        d.thetaStart() + d.deltaTheta() + Math.PI * 2.0 - last.data().thetaStart());
+                segs.set(0, new EllipseGeometry.Segment(merged, first.cell()));
+            }
+        }
+
+        // The cells the ring's wedges will occupy (all inside the region: the outer edge is flush
+        // with the region's faces). Undo must restore those cells' vanilla blocks AND remove the
+        // wedge the ellipse puts into the layer keyed by the same cell.
+        Set<BlockPos> wedgeCells = new HashSet<>();
+        for (EllipseGeometry.Segment seg : segs) {
+            for (int l = 0; l < layers; l++) {
+                wedgeCells.add(cellOf(EllipseGeometry.wedgeCenter(segmentData(seg.data(), v, l, layers))));
+            }
+        }
+
+        // Keep each region cell's real block state (its texture, slab half...) so the ring's
+        // wedges match the wall the player placed.
+        Map<BlockPos, BlockState> cellStates = new HashMap<>();
+        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            BlockPos cell = pos.immutable();
+            RotationData layer = RotationStore.get(level, cell);
+            cellStates.put(cell, layer != null ? layer.state() : level.getBlockState(cell));
+        }
+
+        List<BlockChange> changes = new ArrayList<>();
+        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            BlockPos cell = pos.immutable();
+            // Undo restores this cell's vanilla block AND removes the wedge (if any) that the
+            // ellipse puts into the layer keyed by this cell.
+            changes.add(capture(level, cell, wedgeCells.contains(cell) ? cell : null));
+            level.setBlock(cell, Blocks.AIR.defaultBlockState(), 3);
+            if (RotationStore.get(level, cell) != null) {
+                RotationStore.remove(level, cell);
+            }
+        }
+
+        int wedges = 0;
+        for (EllipseGeometry.Segment seg : segs) {
+            for (int l = 0; l < layers; l++) {
+                EllipseBlockData data = segmentData(seg.data(), v, l, layers);
+                Vec3 wedgeCenter = EllipseGeometry.wedgeCenter(data);
+                BlockPos cell = cellOf(wedgeCenter);
+                BlockState state = cellStates.getOrDefault(cell, level.getBlockState(cell));
+                RotationStore.set(level, cell, new RotationData(state, 0.0f, 0.0f, false, wedgeCenter, null, data));
+                wedges++;
+            }
+        }
+
+        UndoStore.push(player, changes);
+        sendMessage(player, "Ellipsed " + wedges + " block(s) (" + count + "m around the loop).");
+        playSound(player, ModSounds.FILL.get());
+    }
+
+    /** The wedge data of a ring layer: the base wedge shifted {@code layerOff} along the depth
+     *  axis {@code v} so the {@code layers} rings sweep the region's full depth extent. */
+    private static EllipseBlockData segmentData(EllipseBlockData base, Vec3 v, int layer, int layers) {
+        double layerOff = layer - (layers - 1) / 2.0;
+        return new EllipseBlockData(
+                base.cx() + v.x * layerOff, base.cy() + v.y * layerOff, base.cz() + v.z * layerOff,
+                base.ux(), base.uy(), base.uz(),
+                base.wx(), base.wy(), base.wz(),
+                base.a(), base.b(), base.thetaStart(), base.deltaTheta());
+    }
+
+    /** The cell containing the given world-space point. */
+    private static BlockPos cellOf(Vec3 point) {
+        return new BlockPos((int) Math.floor(point.x), (int) Math.floor(point.y), (int) Math.floor(point.z));
+    }
+
+    /** The span (max - min) of the region's cell centres projected onto the unit vector. */
+    private static double cellExtent(BlockPos min, BlockPos max, Vec3 axis) {
+        double lo = Double.POSITIVE_INFINITY;
+        double hi = Double.NEGATIVE_INFINITY;
+        for (int dx = 0; dx <= 1; dx++) {
+            for (int dy = 0; dy <= 1; dy++) {
+                for (int dz = 0; dz <= 1; dz++) {
+                    double px = min.getX() + 0.5 + dx * (max.getX() - min.getX());
+                    double py = min.getY() + 0.5 + dy * (max.getY() - min.getY());
+                    double pz = min.getZ() + 0.5 + dz * (max.getZ() - min.getZ());
+                    double p = px * axis.x + py * axis.y + pz * axis.z;
+                    lo = Math.min(lo, p);
+                    hi = Math.max(hi, p);
+                }
+            }
+        }
+        return hi - lo;
     }
 
     // ------------------------------------------------------------------
@@ -1125,16 +1543,24 @@ public final class BuilderServerHandler {
 
     /** Captures the current state of a block (including block entity NBT) for the undo system. */
     static BlockChange capture(Level level, BlockPos pos) {
+        return capture(level, pos, null);
+    }
+
+    /** Captures a block whose change also REMOVES the mod-layer entry at {@code layerCell} on
+     *  undo (arching replaces the vanilla block with a layer wedge keyed by the same cell). */
+    static BlockChange capture(Level level, BlockPos pos, BlockPos layerCell) {
         BlockState state = level.getBlockState(pos);
         CompoundTag blockEntityNbt = null;
         BlockEntity blockEntity = level.getBlockEntity(pos);
         if (blockEntity != null) {
             blockEntityNbt = blockEntity.saveWithFullMetadata(level.registryAccess());
         }
-        return new BlockChange(pos.immutable(), state, blockEntityNbt);
+        return new BlockChange(pos.immutable(), state, blockEntityNbt,
+                layerCell != null ? List.of(layerCell.immutable()) : List.of());
     }
 
-    /** Restores previously captured block states (undo). */
+    /** Restores previously captured block states (undo). Layer entries the change created (arch
+     *  wedges) are removed alongside, so undo restores the vanilla row AND clears the arch. */
     public static void applyChanges(Level level, List<BlockChange> changes) {
         for (BlockChange change : changes) {
             level.setBlock(change.pos(), change.state(), 3);
@@ -1142,6 +1568,11 @@ public final class BuilderServerHandler {
                 BlockEntity blockEntity = BlockEntity.loadStatic(change.pos(), change.state(), change.blockEntityNbt(), level.registryAccess());
                 if (blockEntity != null) {
                     level.setBlockEntity(blockEntity);
+                }
+            }
+            for (BlockPos layerCell : change.layerCells()) {
+                if (level instanceof ServerLevel serverLevel) {
+                    RotationStore.remove(serverLevel, layerCell);
                 }
             }
         }

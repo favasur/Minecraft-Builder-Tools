@@ -13,7 +13,8 @@
     "BlockGetterMixin",
     "ServerGamePacketListenerImplMixin",
     "LevelMixin",
-    "MultiPlayerGameModeMixin"
+    "MultiPlayerGameModeMixin",
+    "ArchMovementScopeMixin"
   ],
   "injectors": {
     "defaultRequire": 1

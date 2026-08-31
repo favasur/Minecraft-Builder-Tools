@@ -2,6 +2,8 @@ package net.buildertools.server;
 
 import com.mojang.serialization.Codec;
 import com.mojang.serialization.codecs.RecordCodecBuilder;
+import net.buildertools.util.ArchBlockData;
+import net.buildertools.util.EllipseBlockData;
 import net.buildertools.util.RotationData;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.Identifier;
@@ -28,9 +30,12 @@ public class RotationSavedData extends SavedData {
             Codec.FLOAT.fieldOf("yaw").forGetter(RotationData::yaw),
             Codec.FLOAT.fieldOf("pitch").forGetter(RotationData::pitch),
             Codec.BOOL.fieldOf("billboard").forGetter(RotationData::billboard),
-            Vec3.CODEC.optionalFieldOf("center").forGetter(d -> Optional.ofNullable(d.center()))
-    ).apply(i, (state, yaw, pitch, billboard, center) ->
-            new RotationData(state, yaw, pitch, billboard, center.orElse(null))));
+            Vec3.CODEC.optionalFieldOf("center").forGetter(d -> Optional.ofNullable(d.center())),
+            ArchBlockData.CODEC.optionalFieldOf("arch").forGetter(d -> Optional.ofNullable(d.arch())),
+            EllipseBlockData.CODEC.optionalFieldOf("ellipse").forGetter(d -> Optional.ofNullable(d.ellipse()))
+    ).apply(i, (state, yaw, pitch, billboard, center, arch, ellipse) ->
+            new RotationData(state, yaw, pitch, billboard, center.orElse(null),
+                    arch.orElse(null), ellipse.orElse(null))));
 
     private static final Codec<Map.Entry<BlockPos, RotationData>> ENTRY_MAP_CODEC =
             RecordCodecBuilder.create(i -> i.group(

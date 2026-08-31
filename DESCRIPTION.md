@@ -120,11 +120,11 @@ Everything is client-initiated but **server-validated** — nothing is trusted f
 
 | Loader | Minecraft | Jar |
 |---|---|---|
-| NeoForge | 1.21.1 | `buildertools-neoforge-1.21.1-0.2.0.jar` |
-| Fabric | 1.21.1 | `buildertools-fabric-1.21.1-0.2.0.jar` |
-| NeoForge | 26.2 | `buildertools-neoforge-26.2-0.2.0.jar` |
-| Fabric | 26.2 | `buildertools-fabric-26.2-0.2.0.jar` |
-| Forge | 26.2 | `buildertools-forge-26.2-0.2.0.jar` |
+| NeoForge | 1.21.1 | `buildertools-neoforge-1.21.1-0.2.2.jar` |
+| Fabric | 1.21.1 | `buildertools-fabric-1.21.1-0.2.2.jar` |
+| NeoForge | 26.2 | `buildertools-neoforge-26.2-0.2.2.jar` |
+| Fabric | 26.2 | `buildertools-fabric-26.2-0.2.2.jar` |
+| Forge | 26.2 | `buildertools-forge-26.2-0.2.2.jar` |
 
 ## ✅ Requirements
 

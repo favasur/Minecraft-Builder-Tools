@@ -51,12 +51,24 @@ public final class RotatedBlockRendering {
         }
         PoseStack.Pose pose = poseStack.last();
         renderQuadList(state, pos, center, offset, pose, consumer, level,
-                model.allQuads(state, state.getSeed(pos)));
+                model.allQuads(state, state.getSeed(pos)), false);
+    }
+
+    /**
+     * Renders quads whose vertex positions are already WORLD space (the arch wedge geometry): no
+     * center/offset translation - the pose is the plain world-to-camera matrix - and the light is
+     * sampled at each vertex's actual world position. Shading, tint and world-space normals work
+     * exactly like {@link #render}.
+     */
+    public static void renderWorldQuads(BlockState state, PoseStack.Pose pose, VertexConsumer consumer,
+                                        BlockAndTintGetter level, List<BakedQuad> quads) {
+        renderQuadList(state, BlockPos.ZERO, Vec3.ZERO, Vec3.ZERO, pose, consumer, level, quads, true);
     }
 
     private static void renderQuadList(BlockState state, BlockPos pos, Vec3 center, Vec3 offset,
                                        PoseStack.Pose pose, VertexConsumer consumer,
-                                       BlockAndTintGetter level, List<BakedQuad> quads) {
+                                       BlockAndTintGetter level, List<BakedQuad> quads,
+                                       boolean worldSpace) {
         if (quads.isEmpty()) {
             return;
         }
@@ -85,12 +97,21 @@ public final class RotatedBlockRendering {
                 int o = i * 8;
                 // Nudge the corner a hair along the face normal so the sampled cell is the one
                 // the face points into (open air for exposed faces, the wall for touching faces).
-                double wx = center.x - 0.5 + offset.x + Float.intBitsToFloat(v[o])
-                        + normal[0] * LIGHT_NUDGE;
-                double wy = center.y - 0.5 + offset.y + Float.intBitsToFloat(v[o + 1])
-                        + normal[1] * LIGHT_NUDGE;
-                double wz = center.z - 0.5 + offset.z + Float.intBitsToFloat(v[o + 2])
-                        + normal[2] * LIGHT_NUDGE;
+                double wx;
+                double wy;
+                double wz;
+                if (worldSpace) {
+                    wx = Float.intBitsToFloat(v[o]) + normal[0] * LIGHT_NUDGE;
+                    wy = Float.intBitsToFloat(v[o + 1]) + normal[1] * LIGHT_NUDGE;
+                    wz = Float.intBitsToFloat(v[o + 2]) + normal[2] * LIGHT_NUDGE;
+                } else {
+                    wx = center.x - 0.5 + offset.x + Float.intBitsToFloat(v[o])
+                            + normal[0] * LIGHT_NUDGE;
+                    wy = center.y - 0.5 + offset.y + Float.intBitsToFloat(v[o + 1])
+                            + normal[1] * LIGHT_NUDGE;
+                    wz = center.z - 0.5 + offset.z + Float.intBitsToFloat(v[o + 2])
+                            + normal[2] * LIGHT_NUDGE;
+                }
                 lights[i] = LevelRenderer.getLightColor(level, state, BlockPos.containing(wx, wy, wz));
             }
 

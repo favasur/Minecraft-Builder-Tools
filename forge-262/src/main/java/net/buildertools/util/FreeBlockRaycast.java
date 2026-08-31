@@ -3,6 +3,8 @@ package net.buildertools.util;
 import net.buildertools.collision.RotatedCollisionProvider;
 import net.buildertools.server.RotationStore;
 import io.github.favasur.smoothterrain.mesh.MeshCollisionShape;
+import net.buildertools.util.ArchGeometry;
+import net.buildertools.util.EllipseGeometry;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.world.level.BlockGetter;
@@ -32,6 +34,35 @@ public final class FreeBlockRaycast {
         for (Map.Entry<BlockPos, RotationData> e : RotationStore.getInBox(level, rayBox)) {
             BlockPos pos = e.getKey();
             RotationData rot = e.getValue();
+
+            // Arch / ellipse voussoirs raycast against their exact wedge mesh (deterministic
+            // geometry).
+            if (rot.arch() != null) {
+                for (MeshCollisionShape.Tri triangle : ArchGeometry.wedgeTriangles(rot.arch())) {
+                    double[] hit = rayTriangle(from, to, triangle);
+                    if (hit == null || hit[0] >= bestT) {
+                        continue;
+                    }
+                    bestT = hit[0];
+                    Vec3 point = from.add(to.subtract(from).scale(hit[0]));
+                    bestHit = new Hit(pos, point, triangleSide(triangle, from, to),
+                            from.distanceToSqr(point));
+                }
+                continue;
+            }
+            if (rot.ellipse() != null) {
+                for (MeshCollisionShape.Tri triangle : EllipseGeometry.wedgeTriangles(rot.ellipse())) {
+                    double[] hit = rayTriangle(from, to, triangle);
+                    if (hit == null || hit[0] >= bestT) {
+                        continue;
+                    }
+                    bestT = hit[0];
+                    Vec3 point = from.add(to.subtract(from).scale(hit[0]));
+                    bestHit = new Hit(pos, point, triangleSide(triangle, from, to),
+                            from.distanceToSqr(point));
+                }
+                continue;
+            }
 
             // On the client, this is the exact mesh used by RotatedBlockRenderer. Do not fall back
             // to the AABB when a model exists but a ray misses it: the AABB corners are precisely
