@@ -41,13 +41,17 @@ public class UVDump {
                         names[f.kind()], umin, umax, umax - umin, vmin, vmax, vmax - vmin);
             }
         }
-        // Phase continuity at the seam: last u of wedge 0's FRONT face vs first u of wedge 1's.
+        // Phase continuity at the seam: last u of wedge 0's LAST FRONT sub-quad vs the first u
+        // of wedge 1's FIRST FRONT sub-quad (faces: 4 quads per sub-division in the order
+        // INNER, OUTER, BACK, FRONT, then START + END; the last FRONT is index 4*(n-1)+3).
         BezierBlockData d0 = BezierGeometry.blockData(arch, 0, Vec3.ZERO);
         BezierBlockData d1 = BezierGeometry.blockData(arch, 1, Vec3.ZERO);
         List<ArchGeometry.WedgeFace> f0 = BezierGeometry.wedgeFaces(d0);
         List<ArchGeometry.WedgeFace> f1 = BezierGeometry.wedgeFaces(d1);
+        int n = ArchGeometry.ARC_SUBDIVISIONS;
+        double last0 = f0.get(4 * (n - 1) + 3).u()[2];
+        double first1 = f1.get(3).u()[0];
         System.out.printf("seam: wedge0 LAST front u=%.3f, wedge1 FIRST front u=%.3f (gap %.3f)%n",
-                f0.get(f0.size() - 2).u()[0], f1.get(0).u()[0],
-                f1.get(0).u()[0] - f0.get(f0.size() - 2).u()[0]);
+                last0, first1, first1 - last0);
     }
 }

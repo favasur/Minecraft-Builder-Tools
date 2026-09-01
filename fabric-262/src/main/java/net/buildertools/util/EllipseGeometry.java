@@ -341,12 +341,17 @@ public final class EllipseGeometry {
                 continue;
             }
             Direction cull = ArchGeometry.nearestDirection(outwardNormal(c[0], c[1], c[2]));
+            // Rebase the tile phase onto this quad's own tile: every corner's u lands in [0,1]
+            // (one full sprite tile per meter - a corner at exactly N meters is the tile's far
+            // edge, not a restart), so uv never samples past the sprite's atlas rect.
+            float uBase = (float) Math.floor(Math.min(Math.min(face.u()[0], face.u()[1]),
+                    Math.min(face.u()[2], face.u()[3])));
             quads.add(new BakedQuad(
                     ArchGeometry.vec(c[0]), ArchGeometry.vec(c[1]), ArchGeometry.vec(c[2]), ArchGeometry.vec(c[3]),
-                    ArchGeometry.uv(info.sprite(), (float) face.u()[0], (float) face.v()[0]),
-                    ArchGeometry.uv(info.sprite(), (float) face.u()[1], (float) face.v()[1]),
-                    ArchGeometry.uv(info.sprite(), (float) face.u()[2], (float) face.v()[2]),
-                    ArchGeometry.uv(info.sprite(), (float) face.u()[3], (float) face.v()[3]),
+                    ArchGeometry.uv(info.sprite(), Math.min((float) face.u()[0] - uBase, 1.0F), (float) face.v()[0]),
+                    ArchGeometry.uv(info.sprite(), Math.min((float) face.u()[1] - uBase, 1.0F), (float) face.v()[1]),
+                    ArchGeometry.uv(info.sprite(), Math.min((float) face.u()[2] - uBase, 1.0F), (float) face.v()[2]),
+                    ArchGeometry.uv(info.sprite(), Math.min((float) face.u()[3] - uBase, 1.0F), (float) face.v()[3]),
                     cull, info));
         }
         return quads;

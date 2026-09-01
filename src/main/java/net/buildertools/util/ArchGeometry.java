@@ -432,31 +432,43 @@ public final class ArchGeometry {
                     (float) outwardNormal(c[0], c[1], c[2]).x,
                     (float) outwardNormal(c[0], c[1], c[2]).y,
                     (float) outwardNormal(c[0], c[1], c[2]).z);
+            // Rebase the tile phase onto this quad's own tile: every corner's u lands in [0,1]
+            // (one full sprite tile per meter - a corner at exactly N meters is the tile's far
+            // edge, not a restart), so putVertex never samples past the sprite's atlas rect.
+            float uBase = (float) Math.floor(Math.min(Math.min(face.u()[0], face.u()[1]),
+                    Math.min(face.u()[2], face.u()[3])));
             int[] vertices = new int[32];
-            putVertex(vertices, 0, c[0], (float) face.u()[0], (float) face.v()[0], sprite);
-            putVertex(vertices, 1, c[1], (float) face.u()[1], (float) face.v()[1], sprite);
-            putVertex(vertices, 2, c[2], (float) face.u()[2], (float) face.v()[2], sprite);
-            putVertex(vertices, 3, c[3], (float) face.u()[3], (float) face.v()[3], sprite);
+            // The clamp keeps a sub-quad whose arc-length phase straddles a tile boundary (the
+            // 16-step arc-length integration drifts a few cm) inside the sprite: its far corner
+            // lands on exactly 1.0 (the tile's edge), never past the atlas rect.
+            putVertex(vertices, 0, c[0], Math.min((float) face.u()[0] - uBase, 1.0F), (float) face.v()[0], sprite);
+            putVertex(vertices, 1, c[1], Math.min((float) face.u()[1] - uBase, 1.0F), (float) face.v()[1], sprite);
+            putVertex(vertices, 2, c[2], Math.min((float) face.u()[2] - uBase, 1.0F), (float) face.v()[2], sprite);
+            putVertex(vertices, 3, c[3], Math.min((float) face.u()[3] - uBase, 1.0F), (float) face.v()[3], sprite);
             quads.add(new BakedQuad(vertices, -1, cull, sprite, true));
         }
         return quads;
     }
 
     /**
-     * Packs one BLOCK-format vertex (x/y/z floats, white color, sprite UV in tiles, empty
-     * light/normal - the renderer recomputes light and the normal from the geometry). The tile
-     * coordinates are wrapped into [0,1) so the texture TILES once per meter of face instead of
-     * extrapolating past the sprite's atlas rectangle (getU/getV are linear, so a UV of 1.2
-     * would sample the neighboring texture in the atlas and show a broken, stretched look).
+     * Packs one BLOCK-format vertex (x/y/z floats, white color, sprite UV as [0,1] tile-phase
+     * fractions, empty light/normal - the renderer recomputes light and the normal from the
+     * geometry). The caller rebases each quad's u onto its own tile ({@code u - floor(minU)},
+     * see {@link #wedgeQuads}), so every vertex lands inside the sprite's atlas rectangle: the
+     * texture tiles once per meter and the v direction spans the full sprite (0 at one edge, 1
+     * at the other - never wrapped, so a vertex at exactly 1.0 stays at the tile's far edge
+     * instead of snapping back to 0 and stretching one texel row across the whole face).
+     * getU/getV are linear, so a phase past [0,1] would sample the neighboring texture in the
+     * atlas and show a broken, stretched look.
      *
-     * <p>TEMPORARY DEBUG (UV_DEBUG): the block texture is replaced by the atlas's missingno
+     * <p>DEBUG ONLY (UV_DEBUG): when true, the block texture is replaced by the atlas's missingno
      * texture - a hard-edged magenta/black checkerboard - so the true UV scale on the wedges is
      * unmistakable (vertex colours would interpolate to soft gradients). One 16px checker equals
      * one meter of face when the mapping is 1 tile per meter.
      */
-    private static final boolean UV_DEBUG = true;
+    private static final boolean UV_DEBUG = false;
 
-    static void putVertex(int[] out, int index, Vec3 p, float uTiles, float vTiles,
+    static void putVertex(int[] out, int index, Vec3 p, float uPhase, float vPhase,
                                   TextureAtlasSprite sprite) {
         int o = index * 8;
         if (UV_DEBUG) {
@@ -468,8 +480,8 @@ public final class ArchGeometry {
         out[o + 1] = Float.floatToRawIntBits((float) p.y);
         out[o + 2] = Float.floatToRawIntBits((float) p.z);
         out[o + 3] = 0xFFFFFFFF; // white; tint/shade applied by the renderer
-        out[o + 4] = Float.floatToRawIntBits(sprite.getU(uTiles - (float) Math.floor(uTiles)));
-        out[o + 5] = Float.floatToRawIntBits(sprite.getV(vTiles - (float) Math.floor(vTiles)));
+        out[o + 4] = Float.floatToRawIntBits(sprite.getU(uPhase));
+        out[o + 5] = Float.floatToRawIntBits(sprite.getV(vPhase));
         out[o + 6] = 0;
         out[o + 7] = 0;
     }

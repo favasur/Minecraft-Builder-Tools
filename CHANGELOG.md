@@ -2,6 +2,19 @@
 
 All notable changes to Builder Tools are documented in this file.
 
+## [0.2.4] — 2026-09-01
+
+### Fixed
+
+- **Arch / ellipse / Bezier wedge textures** — wedge faces no longer render stretched and noisy.
+  The UV packer wrapped every tile coordinate with a floor-modulus, which collapsed a coordinate
+  of exactly 1.0 back to 0.0: every face sampled a single texel row at the sprite's atlas edge,
+  stretched over the whole face (dirt walls showed the texture's top row as long brown/light-brown
+  vertical stripes, plus gray bleed from the neighboring atlas texture at the boundary). Faces now
+  rebase each quad onto its own tile (`u - floor(minU)`, clamped to 1.0) and pass the v coordinate
+  through untouched, so the texture tiles once per meter with the full sprite on every face — the
+  same convention the FramedBlocks mod uses for its shapes. Applies to all six module builds.
+
 ## [0.2.3] — 2026-09-01
 
 ### Added

@@ -291,11 +291,16 @@ public final class BezierGeometry {
                     (float) outwardNormal(c[0], c[1], c[2]).x,
                     (float) outwardNormal(c[0], c[1], c[2]).y,
                     (float) outwardNormal(c[0], c[1], c[2]).z);
+            // Rebase the tile phase onto this quad's own tile: every corner's u lands in [0,1]
+            // (one full sprite tile per meter - a corner at exactly N meters is the tile's far
+            // edge, not a restart), so putVertex never samples past the sprite's atlas rect.
+            float uBase = (float) Math.floor(Math.min(Math.min(face.u()[0], face.u()[1]),
+                    Math.min(face.u()[2], face.u()[3])));
             int[] vertices = new int[32];
-            ArchGeometry.putVertex(vertices, 0, c[0], (float) face.u()[0], (float) face.v()[0], sprite);
-            ArchGeometry.putVertex(vertices, 1, c[1], (float) face.u()[1], (float) face.v()[1], sprite);
-            ArchGeometry.putVertex(vertices, 2, c[2], (float) face.u()[2], (float) face.v()[2], sprite);
-            ArchGeometry.putVertex(vertices, 3, c[3], (float) face.u()[3], (float) face.v()[3], sprite);
+            ArchGeometry.putVertex(vertices, 0, c[0], Math.min((float) face.u()[0] - uBase, 1.0F), (float) face.v()[0], sprite);
+            ArchGeometry.putVertex(vertices, 1, c[1], Math.min((float) face.u()[1] - uBase, 1.0F), (float) face.v()[1], sprite);
+            ArchGeometry.putVertex(vertices, 2, c[2], Math.min((float) face.u()[2] - uBase, 1.0F), (float) face.v()[2], sprite);
+            ArchGeometry.putVertex(vertices, 3, c[3], Math.min((float) face.u()[3] - uBase, 1.0F), (float) face.v()[3], sprite);
             quads.add(new BakedQuad(vertices, -1, cull, sprite, true));
         }
         return quads;
