@@ -42,6 +42,7 @@ import net.minecraft.core.Direction;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import net.minecraft.network.chat.Component;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.Display;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
@@ -144,13 +145,10 @@ public final class ClientEvents {
         if (item instanceof SelectionToolItem) {
             cancelled = true;
             if (event.getLevel().isClientSide()) {
-                if (player.isShiftKeyDown()) {
-                    SelectionManager.clearSelection();
-                    player.playSound(ModSounds.CLEAR_SELECTION.get(), 1.0f, 1.0f);
-                } else {
-                    SelectionManager.setCorner2(event.getPos());
-                    player.playSound(ModSounds.SET_CORNER_2.get(), 1.0f, 1.0f);
-                }
+                // RMB always sets corner 2; the selection is cleared with the Delete key
+                // (see onClientTick) or the /builder clear command.
+                SelectionManager.setCorner2(event.getPos());
+                player.playSound(ModSounds.SET_CORNER_2.get(), 1.0f, 1.0f);
             }
         } else if (item instanceof EntityToolItem) {
             // Right-clicking a block never moves the selected entity anywhere; entity selection
@@ -217,9 +215,10 @@ public final class ClientEvents {
                         sendBlockRotation(BlockPos.containing(center), center,
                                 BlockRotateState.getYawDeg(), BlockRotateState.getPitchDeg(),
                                 BlockRotateState.isBillboard());
+                        recordRotatedPlacement(player, cell);
                     }
                     BlockRotateState.stop();
-                    player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                    player.swing(InteractionHand.MAIN_HAND);
                 } else {
                     // 1) Aiming at an off-grid block (its cell is air, so the vanilla block
                     // raycast would pass through it and hit the block behind): place a new block
@@ -243,11 +242,11 @@ public final class ClientEvents {
                             if (canPlaceRotatedGridBlock(player, flushCell, flushCenter, 0.0f, 0.0f, null)) {
                                 cancelled = true;
                                 sendBlockRotation(flushCell, flushCenter, 0.0f, 0.0f, false);
-                                player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                                player.swing(InteractionHand.MAIN_HAND);
                             }
                         } else if (tryRotatedSlabPlacement(player, ogHit)) {
                             cancelled = true;
-                            player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                            player.swing(InteractionHand.MAIN_HAND);
                         } else {
                             float[] rot = rotationOfBlock(player.level(), ogHit.cell());
                             Vec3 neighborCenter = centerOfBlock(player.level(), ogHit.cell());
@@ -262,7 +261,7 @@ public final class ClientEvents {
                                     if (canPlaceRotatedGridBlock(player, newCell, newCenter, rot[0], rot[1], null)) {
                                         cancelled = true;
                                         sendBlockRotation(newCell, newCenter, rot[0], rot[1], rot[2] == 1.0f);
-                                        player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                                        player.swing(InteractionHand.MAIN_HAND);
                                     }
                                 }
                             }
@@ -280,7 +279,7 @@ public final class ClientEvents {
                                     center.x, center.y, center.z,
                                     ogHit.block.getPlacementYaw(), ogHit.block.getPlacementPitch(), false,
                                     ogHit.block.isBillboard()));
-                            player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                            player.swing(InteractionHand.MAIN_HAND);
                         }
                     }
                 }
@@ -321,7 +320,7 @@ public final class ClientEvents {
                             center.x, center.y, center.z,
                             ogBlock.getPlacementYaw(), ogBlock.getPlacementPitch(), false,
                             ogBlock.isBillboard()));
-                    player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                    player.swing(InteractionHand.MAIN_HAND);
                 }
             }
         } else if (isBuilderTool(item)) {
@@ -447,7 +446,6 @@ public final class ClientEvents {
                 cancelled = true;
                 if (player.getAbilities().instabuild) {
                     ClientPackets.sendToServer(new FreeBlockBreakPacket(freeCell));
-                    player.playSound(ModSounds.SET_CORNER_2.get(), 1.0f, 1.0f);
                 } else {
                     FreeBlockMining.start(freeCell);
                 }
@@ -459,7 +457,6 @@ public final class ClientEvents {
                         Vec3 c = mineTarget.modelCenter();
                         ClientPackets.sendToServer(new OffGridBlockPacket(
                                 c.x, c.y, c.z, 0.0f, 0.0f, true, false));
-                        player.playSound(ModSounds.SET_CORNER_2.get(), 1.0f, 1.0f);
                     } else {
                         OffGridMining.start(mineTarget);
                     }
@@ -512,7 +509,8 @@ public final class ClientEvents {
                     sendBlockRotation(BlockPos.containing(center), center,
                             BlockRotateState.getYawDeg(), BlockRotateState.getPitchDeg(),
                             BlockRotateState.isBillboard());
-                    player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                    recordRotatedPlacement(player, BlockPos.containing(center));
+                    player.swing(InteractionHand.MAIN_HAND);
                 }
                 BlockRotateState.stop();
                 return false;
@@ -527,7 +525,7 @@ public final class ClientEvents {
                     if (hit.isBlock()) {
                         if (tryRotatedSlabPlacement(player, hit)) {
                             cancelled = true;
-                            player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                            player.swing(InteractionHand.MAIN_HAND);
                         } else {
                             float[] rot = rotationOfBlock(player.level(), hit.cell());
                             Vec3 neighborCenter = centerOfBlock(player.level(), hit.cell());
@@ -542,7 +540,7 @@ public final class ClientEvents {
                                     if (canPlaceRotatedGridBlock(player, newCell, newCenter, rot[0], rot[1], null)) {
                                         cancelled = true;
                                         sendBlockRotation(newCell, newCenter, rot[0], rot[1], rot[2] == 1.0f);
-                                        player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                                        player.swing(InteractionHand.MAIN_HAND);
                                     }
                                 }
                             }
@@ -555,7 +553,7 @@ public final class ClientEvents {
                                     center.x, center.y, center.z,
                                     hit.block.getPlacementYaw(), hit.block.getPlacementPitch(), false,
                                     hit.block.isBillboard()));
-                            player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                            player.swing(InteractionHand.MAIN_HAND);
                         }
                     }
                 } else if (BuilderSettings.isAirPlacement()) {
@@ -584,7 +582,7 @@ public final class ClientEvents {
                         }
                         cancelled = true;
                         sendBlockRotation(cell, Vec3.atCenterOf(cell), yaw, pitch, billboard);
-                        player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                        player.swing(InteractionHand.MAIN_HAND);
                     }
                 }
             }
@@ -676,7 +674,10 @@ public final class ClientEvents {
                     bhr.getBlockPos(), bhr.getDirection()));
         }
         EllipseState.completeEllipse();
-        player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+        if (player.getMainHandItem().getItem() instanceof BlockItem blockItem) {
+            player.playSound(blockItem.getBlock().defaultBlockState().getSoundType().getPlaceSound(), 1.0f, 1.0f);
+        }
+        player.swing(InteractionHand.MAIN_HAND);
         return true;
     }
 
@@ -697,7 +698,10 @@ public final class ClientEvents {
                             bhr.getBlockPos(), bhr.getDirection()));
                 }
                 ArchState.completeArch();
-                player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                if (player.getMainHandItem().getItem() instanceof BlockItem blockItem) {
+                    player.playSound(blockItem.getBlock().defaultBlockState().getSoundType().getPlaceSound(), 1.0f, 1.0f);
+                }
+                player.swing(InteractionHand.MAIN_HAND);
                 return true;
             }
             return false;
@@ -813,7 +817,11 @@ public final class ClientEvents {
             return;
         }
         String[] lines = legendFor(player.getMainHandItem().getItem());
-        if (ArchState.isActive()) {
+        if (BlockRotateState.isActive()) {
+            lines = new String[]{
+                    "Free placement: move the mouse to position the block · hold LMB to rotate",
+                    "RMB or Enter places · R cancels"};
+        } else if (ArchState.isActive()) {
             if (ArchState.phase() == ArchState.Phase.AWAIT_ARCH) {
                 lines = new String[]{
                         "Arch: move the mouse to bend the arch ghost · LMB commits · ALT+A exits"};
@@ -828,9 +836,6 @@ public final class ClientEvents {
         } else if (EllipseState.isActive()) {
             lines = new String[]{
                     "Ellipse (Alt+E): RMB places region blocks · LMB on a block forms the closed ring"};
-        } else if (BlockRotateState.isActive()) {
-            lines = new String[]{
-                    "Off-grid: hold LMB + move mouse to rotate · RMB or Enter places · R cancels"};
         }
         if (lines == null) {
             return;
@@ -847,7 +852,7 @@ public final class ClientEvents {
     private static String[] legendFor(Item item) {
         if (item instanceof SelectionToolItem) {
             return new String[]{
-                    "LMB corner 1 · RMB corner 2 · sneak+RMB clear",
+                    "LMB corner 1 · RMB corner 2 · Del clear",
                     "Y copy · V paste · B fill · U undo",
                     "Drag plates to resize · Alt+drag to stretch"};
         }
@@ -855,7 +860,7 @@ public final class ClientEvents {
             return new String[]{
                     "RMB select · RMB-hold drag · R rotate · Alt+R head",
                     "scroll closer/farther · sneak+scroll up/down · E interface",
-                    "X delete · J dup · G freeze"};
+                    "Del delete · J dup · G freeze"};
         }
         if (item instanceof RulerToolItem) {
             return new String[]{"LMB point A · RMB point B · sneak+RMB clear"};
@@ -1046,13 +1051,11 @@ public final class ClientEvents {
         BlockPos freeMineCell = FreeBlockMining.getTarget();
         if (freeMineCell != null && FreeBlockMining.tick(player)) {
             ClientPackets.sendToServer(new FreeBlockBreakPacket(freeMineCell));
-            player.playSound(ModSounds.SET_CORNER_2.get(), 1.0f, 1.0f);
         }
         if (OffGridMining.tick(player)) {
             Vec3 c = OffGridMining.getTarget().modelCenter();
             ClientPackets.sendToServer(new OffGridBlockPacket(
                     c.x, c.y, c.z, 0.0f, 0.0f, true, false));
-            player.playSound(ModSounds.SET_CORNER_2.get(), 1.0f, 1.0f);
         }
 
         if (held.getItem() instanceof SelectionToolItem) {
@@ -1074,6 +1077,12 @@ public final class ClientEvents {
             }
             while (KeyBindings.UNDO.consumeClick()) {
                 ClientPackets.sendToServer(new UndoPacket());
+            }
+            while (KeyBindings.DELETE.consumeClick()) {
+                if (SelectionManager.hasSelection()) {
+                    SelectionManager.clearSelection();
+                    player.playSound(ModSounds.CLEAR_SELECTION.get(), 1.0f, 1.0f);
+                }
             }
         } else if (held.getItem() instanceof EntityToolItem) {
             while (KeyBindings.ROTATE.consumeClick()) {
@@ -1155,7 +1164,8 @@ public final class ClientEvents {
                     sendBlockRotation(BlockPos.containing(center), center,
                             BlockRotateState.getYawDeg(), BlockRotateState.getPitchDeg(),
                             BlockRotateState.isBillboard());
-                    player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                    recordRotatedPlacement(player, BlockPos.containing(center));
+                    player.swing(InteractionHand.MAIN_HAND);
                 }
                 BlockRotateState.stop();
             }
@@ -1588,6 +1598,16 @@ public final class ClientEvents {
      * thickness along that axis, so the two models touch exactly (like vanilla adjacency, but
      * along the rotated faces).
      */
+    /** Records a rotated-block placement into the active arch/ellipse region, so an R-placed
+     *  block counts as part of the row that ALT+A / ALT+E will transform. */
+    private static void recordRotatedPlacement(Player player, BlockPos cell) {
+        if (ArchState.isActive()) {
+            ArchState.recordPlacement(cell);
+        } else if (EllipseState.isActive()) {
+            EllipseState.recordPlacement(cell);
+        }
+    }
+
     private static Vec3 flushPlacementCenter(OffGridBlockEntity block, Vec3 worldNormal) {
         Vec3 center = block.modelCenter();
         org.joml.Quaternionf rot = net.buildertools.util.OffGridTransform.rotation(

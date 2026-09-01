@@ -2,6 +2,35 @@
 
 All notable changes to Builder Tools are documented in this file.
 
+## [0.2.5] — 2026-09-01
+
+### Added
+
+- **Free off-grid placement** — the rotated-block placement preview (R with a block in hand) no
+  longer snaps to the vanilla XYZ grid: the block follows the cursor ray continuously. Aiming at
+  a surface places it flush against that surface at the exact cursor point; aiming at air floats
+  it at the air-place distance. Hold LMB to rotate strictly in place, RMB or Enter to place at
+  any point.
+- **Arching and Ellipse on rotated blocks** — R-placed rotated blocks now count as part of the
+  row/region when Arching (ALT+A/ALT+C) or Ellipsing (ALT+E): both commits accept walls that mix
+  vanilla and rotated blocks, and the voussoirs take the rotated blocks' material.
+- **Delete key clears the selection** — the Selection Tool's area now clears with the Delete key
+  (rebindable in Controls; the same key deletes entities with the Entity Tool) instead of
+  sneak+RMB, which now always sets corner 2.
+
+### Fixed
+
+- **Wedge junction texture duplication** — sub-quads whose arc-length phase straddles a tile
+  boundary are now split in two exactly AT the boundary, so the tile's far edge lands on the
+  boundary vertex instead of being clamped: the tile's last column is no longer stretched into
+  a duplicated vertical stripe at every voussoir junction (the 16-step arc-length integration
+  drifts a few cm, which previously pushed the far corner past the tile and triggered the
+  clamp). Applies to all six module builds.
+- **Placement and break sounds** — placing rotated/off-grid blocks (and committing arch/ellipse
+  rings) now plays the placed block's own place sound at the block instead of the selection
+  beep, breaking mod blocks plays only the block's real break sound (the redundant beep is
+  gone), and every placement swings the player's hand like a vanilla placement.
+
 ## [0.2.4] — 2026-09-01
 
 ### Fixed

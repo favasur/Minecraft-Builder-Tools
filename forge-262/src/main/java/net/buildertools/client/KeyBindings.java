@@ -24,7 +24,7 @@ public final class KeyBindings {
     public static final KeyMapping UNDO = new KeyMapping("key.buildertools.undo", InputConstants.Type.KEYSYM, InputConstants.KEY_U, CATEGORY);
 
     // Entity tool
-    public static final KeyMapping DELETE = new KeyMapping("key.buildertools.delete", InputConstants.Type.KEYSYM, InputConstants.KEY_X, CATEGORY);
+    public static final KeyMapping DELETE = new KeyMapping("key.buildertools.delete", InputConstants.Type.KEYSYM, InputConstants.KEY_DELETE, CATEGORY);
     public static final KeyMapping DUPLICATE = new KeyMapping("key.buildertools.duplicate", InputConstants.Type.KEYSYM, InputConstants.KEY_J, CATEGORY);
     public static final KeyMapping FREEZE = new KeyMapping("key.buildertools.freeze", InputConstants.Type.KEYSYM, InputConstants.KEY_G, CATEGORY);
     public static final KeyMapping ROTATE = new KeyMapping("key.buildertools.rotate", InputConstants.Type.KEYSYM, InputConstants.KEY_R, CATEGORY);

@@ -432,22 +432,72 @@ public final class ArchGeometry {
                     (float) outwardNormal(c[0], c[1], c[2]).x,
                     (float) outwardNormal(c[0], c[1], c[2]).y,
                     (float) outwardNormal(c[0], c[1], c[2]).z);
-            // Rebase the tile phase onto this quad's own tile: every corner's u lands in [0,1]
-            // (one full sprite tile per meter - a corner at exactly N meters is the tile's far
-            // edge, not a restart), so putVertex never samples past the sprite's atlas rect.
-            float uBase = (float) Math.floor(Math.min(Math.min(face.u()[0], face.u()[1]),
-                    Math.min(face.u()[2], face.u()[3])));
-            int[] vertices = new int[32];
-            // The clamp keeps a sub-quad whose arc-length phase straddles a tile boundary (the
-            // 16-step arc-length integration drifts a few cm) inside the sprite: its far corner
-            // lands on exactly 1.0 (the tile's edge), never past the atlas rect.
-            putVertex(vertices, 0, c[0], Math.min((float) face.u()[0] - uBase, 1.0F), (float) face.v()[0], sprite);
-            putVertex(vertices, 1, c[1], Math.min((float) face.u()[1] - uBase, 1.0F), (float) face.v()[1], sprite);
-            putVertex(vertices, 2, c[2], Math.min((float) face.u()[2] - uBase, 1.0F), (float) face.v()[2], sprite);
-            putVertex(vertices, 3, c[3], Math.min((float) face.u()[3] - uBase, 1.0F), (float) face.v()[3], sprite);
-            quads.add(new BakedQuad(vertices, -1, cull, sprite, true));
+            addFaceQuads(quads, face, sprite, cull);
         }
         return quads;
+    }
+
+    /**
+     * Emits the quads of one wedge face. Every sub-quad's u phase is rebased onto its own tile
+     * ({@code u - floor(minU)}) so the texture tiles once per meter; a sub-quad whose arc-length
+     * phase straddles a tile boundary (the 16-step arc-length integration drifts a few cm) is
+     * split in two AT the boundary, so the tile's far edge is never stretched over the strip nor
+     * its last column duplicated at the wedge junction - the far side simply starts the next
+     * tile. The v phase is passed through untouched (always exactly 0 or 1).
+     */
+    static void addFaceQuads(List<BakedQuad> out, WedgeFace face,
+                             TextureAtlasSprite sprite, Direction cull) {
+        double minU = Math.min(Math.min(face.u()[0], face.u()[1]), Math.min(face.u()[2], face.u()[3]));
+        double maxU = Math.max(Math.max(face.u()[0], face.u()[1]), Math.max(face.u()[2], face.u()[3]));
+        double base = Math.floor(minU);
+        double boundary = Math.floor(maxU);
+        if (boundary > base && maxU > boundary) {
+            // Straddles the tile boundary at `boundary`: split at it. The min-u edge's corners
+            // pair with the max-u edge's by their v (each edge keeps its own v); the two split
+            // corners are interpolated linearly along the quad.
+            double f = (boundary - minU) / (maxU - minU);
+            int[] ai = {-1, -1};
+            int[] bi = {-1, -1};
+            for (int j = 0; j < 4; j++) {
+                int slot = face.v()[j] == 0.0 ? 0 : 1;
+                if (face.u()[j] == minU) {
+                    ai[slot] = j;
+                } else {
+                    bi[slot] = j;
+                }
+            }
+            Vec3[] c = face.corners();
+            Vec3 s0 = c[ai[0]].add(c[bi[0]].subtract(c[ai[0]]).scale(f));
+            Vec3 s1 = c[ai[1]].add(c[bi[1]].subtract(c[ai[1]]).scale(f));
+            double lowU = minU - base;
+            double highU = maxU - boundary;
+            // left part: [minU, boundary] -> [lowU, 1.0]
+            emitQuad(out, c[ai[0]], s0, s1, c[ai[1]],
+                    lowU, 1.0, 1.0, lowU,
+                    face.v()[ai[0]], face.v()[ai[0]], face.v()[ai[1]], face.v()[ai[1]], sprite, cull);
+            // right part: [boundary, maxU] -> [0.0, highU]
+            emitQuad(out, s0, c[bi[0]], c[bi[1]], s1,
+                    0.0, highU, highU, 0.0,
+                    face.v()[ai[0]], face.v()[ai[0]], face.v()[ai[1]], face.v()[ai[1]], sprite, cull);
+        } else {
+            Vec3[] c = face.corners();
+            emitQuad(out, c[0], c[1], c[2], c[3],
+                    face.u()[0] - base, face.u()[1] - base, face.u()[2] - base, face.u()[3] - base,
+                    face.v()[0], face.v()[1], face.v()[2], face.v()[3], sprite, cull);
+        }
+    }
+
+    /** Builds one BakedQuad from the four corners and their [0,1] tile-phase UVs. */
+    private static void emitQuad(List<BakedQuad> out, Vec3 p0, Vec3 p1, Vec3 p2, Vec3 p3,
+                                 double u0, double u1, double u2, double u3,
+                                 double v0, double v1, double v2, double v3,
+                                 TextureAtlasSprite sprite, Direction cull) {
+        int[] vertices = new int[32];
+        putVertex(vertices, 0, p0, (float) u0, (float) v0, sprite);
+        putVertex(vertices, 1, p1, (float) u1, (float) v1, sprite);
+        putVertex(vertices, 2, p2, (float) u2, (float) v2, sprite);
+        putVertex(vertices, 3, p3, (float) u3, (float) v3, sprite);
+        out.add(new BakedQuad(vertices, -1, cull, sprite, true));
     }
 
     /**

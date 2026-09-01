@@ -338,7 +338,7 @@ public final class BuilderServerHandler {
         // Every cell of the box must hold a solid block (gaps mean the player never stretched the
         // wall - the stretch fills it). Check before changing anything.
         for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
-            if (level.getBlockState(pos).isAir()) {
+            if (level.getBlockState(pos).isAir() && RotationStore.get(level, pos) == null) {
                 sendError(player, "Arch: the wall has gaps - stretch it first to fill them.");
                 return;
             }
@@ -616,7 +616,7 @@ public final class BuilderServerHandler {
 
         // Every cell of the region must be solid (the workflow: place the wall, then hit ALT+E).
         for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
-            if (level.getBlockState(pos).isAir()) {
+            if (level.getBlockState(pos).isAir() && RotationStore.get(level, pos) == null) {
                 sendError(player, "Ellipse: the wall has gaps - fill them first.");
                 return;
             }
@@ -1125,7 +1125,7 @@ public final class BuilderServerHandler {
             recordOffGridPlacement(player, cell);
             sendDebug(player, "Rotated block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
                     + (billboard ? ", billboard" : "") + ").");
-            playSound(player, ModSounds.SET_CORNER_1.get());
+            level.playSound(null, cell, existing.state().getSoundType().getPlaceSound(), SoundSource.BLOCKS, 1.0f, 1.0f);
             return;
         }
         // New placement: the held block into the cell, then record its rotation.
@@ -1161,7 +1161,7 @@ public final class BuilderServerHandler {
         }
         sendDebug(player, "Placed block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch)
                 + (billboard ? ", billboard" : "") + ").");
-        playSound(player, ModSounds.SET_CORNER_1.get());
+        level.playSound(null, cell, state.getSoundType().getPlaceSound(), SoundSource.BLOCKS, 1.0f, 1.0f);
     }
 
     /**
@@ -1220,7 +1220,6 @@ public final class BuilderServerHandler {
             }
         }
         RotationStore.remove(level, cell);
-        playSound(player, ModSounds.SET_CORNER_2.get());
     }
 
     /**
@@ -1240,7 +1239,7 @@ public final class BuilderServerHandler {
             spawnLegacyPair(level, c.x, c.y, c.z, state, yaw, pitch, billboard);
             recordOffGridPlacement(player, BlockPos.containing(cx, cy, cz));
             sendDebug(player, "Rotated legacy block (yaw " + Math.round(yaw) + ", pitch " + Math.round(pitch) + ").");
-            playSound(player, ModSounds.SET_CORNER_1.get());
+            level.playSound(null, BlockPos.containing(cx, cy, cz), state.getSoundType().getPlaceSound(), SoundSource.BLOCKS, 1.0f, 1.0f);
             return;
         }
         handleBlockRotation(player, BlockPos.containing(cx, cy, cz), cx, cy, cz, yaw, pitch, billboard);
@@ -1333,7 +1332,6 @@ public final class BuilderServerHandler {
             }
         }
         block.discardWithDisplay();
-        playSound(player, ModSounds.SET_CORNER_2.get());
     }
 
     /** Finds the solid off-grid block whose model center is nearest the given point, or null. */

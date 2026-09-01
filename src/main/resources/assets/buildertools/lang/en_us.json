@@ -11,7 +11,7 @@
   "key.buildertools.paste": "Paste Clipboard",
   "key.buildertools.fill": "Fill Selection",
   "key.buildertools.undo": "Undo Last Operation",
-  "key.buildertools.delete": "Delete Selected Entity",
+  "key.buildertools.delete": "Delete Selected",
   "key.buildertools.duplicate": "Duplicate Selected Entity",
   "key.buildertools.freeze": "Freeze / Unfreeze Selected Entity",
   "key.buildertools.rotate": "Rotate Selected Entity (mode)",
