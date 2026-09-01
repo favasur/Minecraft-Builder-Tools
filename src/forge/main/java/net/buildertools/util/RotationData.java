@@ -19,19 +19,21 @@ import net.minecraft.world.phys.Vec3;
  * rotated by yaw/pitch, it renders and collides as the tapered wedge described by
  * {@link ArchBlockData} (yaw/pitch are unused, and the model center is the wedge's centerline
  * pivot). When {@code ellipse} is non-null the entry is an ellipse VOUSSOIR of a closed
- * elliptical ring ({@link EllipseBlockData}); arch and ellipse are mutually exclusive.
+ * elliptical ring ({@link EllipseBlockData}); when {@code bezier} is non-null the entry is a
+ * Bezier arch VOUSSOIR ({@link BezierBlockData}). Arch, ellipse and bezier are mutually
+ * exclusive.
  */
 public record RotationData(BlockState state, float yaw, float pitch, boolean billboard, Vec3 center,
-                           ArchBlockData arch, EllipseBlockData ellipse) {
+                           ArchBlockData arch, EllipseBlockData ellipse, BezierBlockData bezier) {
 
     /** Cell-centered entry (the standard case: a block placed on the vanilla grid). */
     public RotationData(BlockState state, float yaw, float pitch, boolean billboard) {
-        this(state, yaw, pitch, billboard, null, null, null);
+        this(state, yaw, pitch, billboard, null, null, null, null);
     }
 
     /** Entry with an explicit model center, without arch/ellipse geometry. */
     public RotationData(BlockState state, float yaw, float pitch, boolean billboard, Vec3 center) {
-        this(state, yaw, pitch, billboard, center, null, null);
+        this(state, yaw, pitch, billboard, center, null, null, null);
     }
 
     /** The world-space model center of the block: the explicit center, or the cell center for

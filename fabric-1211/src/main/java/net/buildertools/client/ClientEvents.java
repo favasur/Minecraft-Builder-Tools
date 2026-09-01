@@ -66,10 +66,13 @@ import net.neoforged.neoforge.client.event.InputEvent;
 import net.neoforged.neoforge.client.event.RenderGuiEvent;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.tick.PlayerTickEvent;
+import net.minecraft.client.KeyMapping;
 import org.lwjgl.glfw.GLFW;
 
 @OnlyIn(Dist.CLIENT)
 public final class ClientEvents {
+    /** Previous tick's arch chord state, so a single ALT+A / ALT+C press toggles arch mode. */
+    private static boolean archChordPrev;
     private ClientEvents() {
     }
 
@@ -202,25 +205,43 @@ public final class ClientEvents {
                     // an off-grid block still behaves normally.
                     OffGridHit ogHit = raycastOffGridHit(player, 6.0);
                     if (ogHit != null && ogHit.isBlock()) {
-                        // Rotated LAYER block: place the next block FLUSH against the clicked
-                        // rotated face, one unit along the neighbor's OWN rotated axis (the ray
-                        // transformed into its local frame tells which face was clicked), and
-                        // inherit its rotation - clicking the same face again keeps building the
-                        // continuous rotated plane (PlaceAnywhere-style), not an XYZ staircase.
-                        float[] rot = rotationOfBlock(player.level(), ogHit.cell());
-                        Vec3 neighborCenter = centerOfBlock(player.level(), ogHit.cell());
-                        if (rot != null) {
-                            Vec3 offset = OffGridTransform.rotatedGridOffset(
-                                    OffGridTransform.rotation(rot[0], rot[1]), neighborCenter,
-                                    stateBoundsOfBlock(player.level(), ogHit.cell()),
-                                    player.getEyePosition(1.0f), player.getLookAngle());
-                            if (offset != null) {
-                                Vec3 newCenter = neighborCenter.add(offset);
-                                BlockPos newCell = BlockPos.containing(newCenter);
-                                if (canPlaceRotatedGridBlock(player, newCell, newCenter, rot[0], rot[1])) {
-                                    event.setCanceled(true);
-                                    sendBlockRotation(newCell, newCenter, rot[0], rot[1], rot[2] == 1.0f);
-                                    player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                        // Arch / ellipse voussoir: place the held block FLUSH against the wedge's
+                        // exact face - the raycast hit point nudged half a block along the face
+                        // normal (the wedge lives in an air cell, so the vanilla block raycast
+                        // reports the wedge cell via the layer-aware clip). This lets blocks be
+                        // attached onto the arch's curved surface to thicken or extend it.
+                        RotationData hitRot = RotationStore.get(player.level(), ogHit.cell());
+                        if (hitRot != null && (hitRot.arch() != null || hitRot.ellipse() != null || hitRot.bezier() != null)) {
+                            Direction side = ogHit.face();
+                            Vec3 flushNormal = new Vec3(side.getStepX(), side.getStepY(), side.getStepZ());
+                            Vec3 flushCenter = ogHit.hitPoint().add(flushNormal.scale(0.5));
+                            BlockPos flushCell = BlockPos.containing(flushCenter);
+                            if (canPlaceRotatedGridBlock(player, flushCell, flushCenter, 0.0f, 0.0f)) {
+                                event.setCanceled(true);
+                                sendBlockRotation(flushCell, flushCenter, 0.0f, 0.0f, false);
+                                player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                            }
+                        } else {
+                            // Rotated LAYER block: place the next block FLUSH against the clicked
+                            // rotated face, one unit along the neighbor's OWN rotated axis (the ray
+                            // transformed into its local frame tells which face was clicked), and
+                            // inherit its rotation - clicking the same face again keeps building the
+                            // continuous rotated plane (PlaceAnywhere-style), not an XYZ staircase.
+                            float[] rot = rotationOfBlock(player.level(), ogHit.cell());
+                            Vec3 neighborCenter = centerOfBlock(player.level(), ogHit.cell());
+                            if (rot != null) {
+                                Vec3 offset = OffGridTransform.rotatedGridOffset(
+                                        OffGridTransform.rotation(rot[0], rot[1]), neighborCenter,
+                                        stateBoundsOfBlock(player.level(), ogHit.cell()),
+                                        player.getEyePosition(1.0f), player.getLookAngle());
+                                if (offset != null) {
+                                    Vec3 newCenter = neighborCenter.add(offset);
+                                    BlockPos newCell = BlockPos.containing(newCenter);
+                                    if (canPlaceRotatedGridBlock(player, newCell, newCenter, rot[0], rot[1])) {
+                                        event.setCanceled(true);
+                                        sendBlockRotation(newCell, newCenter, rot[0], rot[1], rot[2] == 1.0f);
+                                        player.playSound(ModSounds.SET_CORNER_1.get(), 1.0f, 1.0f);
+                                    }
                                 }
                             }
                         }
@@ -610,12 +631,18 @@ public final class ClientEvents {
                 && GLFW.glfwGetKey(window, GLFW.GLFW_KEY_A) == GLFW.GLFW_PRESS;
     }
 
-    /** Whether the Ellipse chord (ALT + E or ALT + C) is currently held. */
+    /** Whether the second Arching chord (ALT + C) is currently held. */
+    private static boolean isAltCDown(Minecraft minecraft) {
+        long window = minecraft.getWindow().getWindow();
+        return isAltDown(minecraft)
+                && GLFW.glfwGetKey(window, GLFW.GLFW_KEY_C) == GLFW.GLFW_PRESS;
+    }
+
+    /** Whether the Ellipse chord (ALT + E) is currently held. */
     private static boolean isEllipseKeyDown(Minecraft minecraft) {
         long window = minecraft.getWindow().getWindow();
         return isAltDown(minecraft)
-                && (GLFW.glfwGetKey(window, GLFW.GLFW_KEY_E) == GLFW.GLFW_PRESS
-                    || GLFW.glfwGetKey(window, GLFW.GLFW_KEY_C) == GLFW.GLFW_PRESS);
+                && GLFW.glfwGetKey(window, GLFW.GLFW_KEY_E) == GLFW.GLFW_PRESS;
     }
 
     /**
@@ -775,17 +802,18 @@ public final class ClientEvents {
         if (ArchState.isActive()) {
             if (ArchState.phase() == ArchState.Phase.AWAIT_ARCH) {
                 lines = new String[]{
-                        "Arch: row stretched - click a block to the left/right to arch it"};
+                        "Arch: move the mouse to bend the arch ghost · LMB commits · ALT+A exits"};
             } else if (ArchState.phase() == ArchState.Phase.DRAGGING) {
                 lines = new String[]{
                         "Arch: hold LMB + move mouse to stretch the row · release to keep"};
             } else {
                 lines = new String[]{
-                        "Arch: RMB places row blocks · LMB+drag stretches · release, then click to arch"};
+                        "Arch mode ON (ALT+A toggles): RMB places row blocks · LMB+drag stretches",
+                        "then move the mouse to bend the ghost and LMB to arch"};
             }
         } else if (EllipseState.isActive()) {
             lines = new String[]{
-                    "Ellipse (Alt+E/C): RMB places region blocks · LMB on a block forms the closed ring"};
+                    "Ellipse (Alt+E): RMB places region blocks · LMB on a block forms the closed ring"};
         } else if (BlockRotateState.isActive()) {
             lines = new String[]{
                     "Off-grid: hold LMB + move mouse to rotate · RMB or Enter places · R cancels"};
@@ -834,11 +862,33 @@ public final class ClientEvents {
      * In creative mode, pressing E opens the Creative Settings window instead of the
      * vanilla inventory (the vanilla creative item picker is reachable from a button inside it).
      */
-    @SubscribeEvent
+    @SubscribeEvent    /**
+     * While a mechanic chord is held, force the down-state off for every key mapping bound to
+     * the chord's key (A = Move Left, E = Inventory, C = Save Hotbar). Movement reads isDown()
+     * every tick, so swallowing clicks alone still strafes the player while ALT+A is held;
+     * clearing the down-state keeps the chord inert for vanilla bindings. The real key state
+     * takes over again as soon as the chord is released.
+     */    private static void suppressChordKey(Minecraft minecraft, int glfwKey) {
+        for (KeyMapping mapping : minecraft.options.keyMappings) {
+            if (mapping.matches(glfwKey, 0)) {
+                mapping.setDown(false);
+            }
+        }
+    }
+
     public static void onClientTickPre(ClientTickEvent.Pre event) {
         Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.player == null || minecraft.screen != null) {
             return;
+        }
+        // The mechanic chords borrow vanilla keys; keep them from triggering the bound action
+        // (most importantly: ALT+A must not strafe the player via the "Move Left" binding).
+        if (isArchKeyDown(minecraft) || isAltCDown(minecraft)) {
+            suppressChordKey(minecraft, GLFW.GLFW_KEY_A);
+            suppressChordKey(minecraft, GLFW.GLFW_KEY_C);
+        }
+        if (isEllipseKeyDown(minecraft)) {
+            suppressChordKey(minecraft, GLFW.GLFW_KEY_E);
         }
         // While the off-grid placement preview is up, Enter confirms the placement instead of
         // opening chat. Swallowing the chat key here (before the game's own consumeClick runs)
@@ -901,30 +951,41 @@ public final class ClientEvents {
         }
         ItemStack held = player.getMainHandItem();
 
-        // Arching (ALT+A held with a block in hand): enter arch mode while the chord is held,
-        // track the stretch drag every tick, and drop out when ALT+A (or the block) is released.
-        boolean archKeyHeld = isArchKeyDown(minecraft);
+        // Arching (press ALT+A or ALT+C once to toggle): arch mode stays on after the chord is
+        // released - RMB places the row blocks, LMB-drag stretches it, the bend ghost follows
+        // the mouse live, LMB commits the arch. Press the chord again to leave.
+        boolean archChord = isArchKeyDown(minecraft) || isAltCDown(minecraft);
+        if (archChord && !archChordPrev) {
+            if (ArchState.isActive()) {
+                ArchState.end();
+                player.displayClientMessage(Component.literal("Arch mode OFF"), true);
+            } else if (held.getItem() instanceof BlockItem) {
+                EllipseState.end();
+                ArchState.begin();
+                player.displayClientMessage(Component.literal(
+                        "Arch mode ON: RMB places row blocks · LMB+drag stretches · move the mouse to bend the ghost · LMB to arch"), true);
+            }
+        }
+        archChordPrev = archChord;
         if (ArchState.isActive()) {
-            if (!archKeyHeld || !(held.getItem() instanceof BlockItem)) {
+            if (!(held.getItem() instanceof BlockItem)) {
                 ArchState.end();
             } else if (ArchState.isDragging()) {
                 ArchState.updateDrag(player.getEyePosition(1.0f), player.getLookAngle());
             }
-        } else if (archKeyHeld && held.getItem() instanceof BlockItem) {
-            ArchState.begin();
         }
 
         // Ellipse (ALT+E held with a block in hand): enter ellipse mode while the chord is held,
-        // and drop out when ALT+E (or the block) is released. ALT+E takes precedence over ALT+A
-        // so the two chords cannot both be active.
+        // and drop out when ALT+E (or the block) is released. ALT+E takes precedence over arch
+        // mode so the two cannot both be active.
         boolean ellipseKeyHeld = isEllipseKeyDown(minecraft);
         if (EllipseState.isActive()) {
             if (!ellipseKeyHeld || !(held.getItem() instanceof BlockItem)) {
                 EllipseState.end();
             }
         } else if (ellipseKeyHeld && held.getItem() instanceof BlockItem) {
-            EllipseState.begin();
             ArchState.end();
+            EllipseState.begin();
         }
 
         // While a handle is being dragged, track the mouse ray against the drag plane.

@@ -2,6 +2,8 @@ package net.buildertools.server;
 
 import net.buildertools.util.ArchBlockData;
 import net.buildertools.util.ArchGeometry;
+import net.buildertools.util.BezierBlockData;
+import net.buildertools.util.BezierGeometry;
 import net.buildertools.util.EllipseBlockData;
 import net.buildertools.util.EllipseGeometry;
 import net.buildertools.util.FaceFrame;
@@ -390,6 +392,7 @@ public final class BuilderServerHandler {
             return;
         }
         ArchGeometry.ArchResult arch = ra.arch();
+        BezierGeometry.BezierArch bezier = ra.bezier();
         int count = ra.count();
         double span = ra.span();
         Vec3 center = ra.center();
@@ -397,52 +400,188 @@ public final class BuilderServerHandler {
         // Radial layers: cells offset along w get their own centerline radius R + layer. Only a
         // wall with real thickness can collapse its innermost layer (a wedge whose inner arc
         // would invert); a plain 1-wide row has no layers and keeps its exact pre-wall arch
-        // behaviour even for very tight arches.
-        Vec3 v = arch.u().cross(arch.w());
+        // behaviour even for very tight arches. The Bezier wall arch has no radius (the band is
+        // a flat 1m-thick curve, so extra thickness just translates the band - no inversion is
+        // possible), so the check only applies to the circular bow.
+        Vec3 v = arch != null ? arch.u().cross(arch.w()) : bezier.v();
         int maxAbsLayer = 0;
         for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
             maxAbsLayer = Math.max(maxAbsLayer,
-                    Math.abs((int) Math.round(Vec3.atCenterOf(pos).subtract(center).dot(arch.w()))));
+                    Math.abs((int) Math.round(Vec3.atCenterOf(pos).subtract(center).dot(arch != null ? arch.w() : bezier.w()))));
         }
-        if (maxAbsLayer > 0 && arch.radius() - maxAbsLayer - 0.5 < 0.5) {
+        if (arch != null && maxAbsLayer > 0 && arch.radius() - maxAbsLayer - 0.5 < 0.5) {
             sendError(player, "Arch: the wall is too thick for this arch height - click farther from the wall (more rise) or shorten the span.");
             return;
         }
 
-        List<BlockChange> changes = new ArrayList<>();
-        int half = (count - 1) / 2;
-        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
-            BlockPos cell = pos.immutable();
-            Vec3 offset = Vec3.atCenterOf(cell).subtract(center);
-            int i = Math.max(0, Math.min(count - 1, (int) Math.round(offset.dot(arch.u())) + half));
-            int wLayer = (int) Math.round(offset.dot(arch.w()));
-            int vCol = (int) Math.round(offset.dot(v));
-
-            // The wedge keeps the cell's exact block state (its texture, slab half, stair shape...).
-            RotationData layer = RotationStore.get(level, cell);
-            BlockState state = layer != null ? layer.state() : level.getBlockState(cell);
-            ArchBlockData base = ArchGeometry.blockData(arch, i, count);
-            // Offset the wedge into its depth column (shift the circle center along v) and radial
-            // layer (its own centerline radius), so columns and layers tile without gaps.
-            ArchBlockData data = new ArchBlockData(
-                    base.ox() + v.x * vCol, base.oy() + v.y * vCol, base.oz() + v.z * vCol,
-                    base.ux(), base.uy(), base.uz(),
-                    base.wx(), base.wy(), base.wz(),
-                    base.thetaStart(), base.deltaTheta(), base.radius() + wLayer);
-            Vec3 wedgeCenter = ArchGeometry.wedgeCenter(data);
-            // Undo must restore this cell's vanilla block AND remove the wedge the arch puts into
-            // the layer keyed by this cell.
-            changes.add(capture(level, cell, cell));
-            level.setBlock(cell, Blocks.AIR.defaultBlockState(), 3);
-            if (layer != null) {
-                RotationStore.remove(level, cell);
-            }
-            RotationStore.set(level, cell, new RotationData(state, 0.0f, 0.0f, false, wedgeCenter, data, null));
-        }
-
+        List<BlockChange> changes = archBlocksCore(level, min, max, ra);
         UndoStore.push(player, changes);
         sendMessage(player, "Arched " + changes.size() + " block(s) (span " + (count - 1) + "m).");
         playSound(player, ModSounds.FILL.get());
+    }
+
+    /** One wedge of the arch plus the cell that keys it (the cell its centerline midpoint lands
+     *  in). Exactly one of {@code arch} (circular bow) and {@code bezier} (Bezier wall arch) is
+     *  non-null. Consecutive voussoirs that land in the same cell are merged into one wider wedge
+     *  by the commit (the layer is keyed by cell, so two wedges cannot share a cell). */
+    private record ArchWedge(ArchBlockData arch, BezierBlockData bezier, BlockPos cell) {
+    }
+
+    /** The player-free core of the arch commit: the stretched wall becomes a smooth band of
+     *  tapered voussoirs - one ~1m row of wedges per radial layer and depth column of the
+     *  region - each keyed by the cell its centerline lands in (so the arch occupies the cells
+     *  along the arc, rising above the original row, and the row's middle opens up underneath).
+     *  Returns the undo changes. Player-free so the workflow can be verified headlessly (the
+     *  client ghost and the commit share {@link ArchGeometry#regionArch}). */
+    public static List<BlockChange> archBlocksCore(ServerLevel level, BlockPos min, BlockPos max,
+                                            ArchGeometry.RegionArch ra) {
+        ArchGeometry.ArchResult arch = ra.arch();
+        BezierGeometry.BezierArch bezier = ra.bezier();
+        int count = ra.count();
+        Vec3 center = ra.center();
+        // The depth axis (v) and rise axis (rise) of the arch frame: the circular bow derives
+        // them from its circle; the Bezier wall arch carries them directly.
+        Vec3 v = arch != null ? arch.u().cross(arch.w()) : bezier.v();
+        Vec3 rise = arch != null ? arch.w() : bezier.w();
+
+        // The wedge block states: a wedge keeps the state of the region cell its center lands in;
+        // cells the arc rises into (outside the region, previously air) use the first solid
+        // region state so the whole arch is made of the wall's block.
+        Map<BlockPos, BlockState> cellStates = new HashMap<>();
+        BlockState fallback = null;
+        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            BlockPos cell = pos.immutable();
+            RotationData layer = RotationStore.get(level, cell);
+            BlockState state = layer != null ? layer.state() : level.getBlockState(cell);
+            cellStates.put(cell, state);
+            if (fallback == null && !state.isAir()) {
+                fallback = state;
+            }
+        }
+        if (fallback == null) {
+            fallback = Blocks.STONE.defaultBlockState();
+        }
+
+        // The radial layers (cells offset along the rise axis w) and depth columns (offset along
+        // v) the region spans; each (layer, column) pair is one ring of `count` voussoirs.
+        int minW = Integer.MAX_VALUE, maxW = Integer.MIN_VALUE;
+        int minV = Integer.MAX_VALUE, maxV = Integer.MIN_VALUE;
+        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            Vec3 offset = Vec3.atCenterOf(pos).subtract(center);
+            minW = Math.min(minW, (int) Math.round(offset.dot(rise)));
+            maxW = Math.max(maxW, (int) Math.round(offset.dot(rise)));
+            minV = Math.min(minV, (int) Math.round(offset.dot(v)));
+            maxV = Math.max(maxV, (int) Math.round(offset.dot(v)));
+        }
+
+        List<ArchWedge> wedges = new ArrayList<>();
+        // Every cell may hold exactly ONE wedge (the RotationStore is keyed by cell); wedges of
+        // different rings whose centreline midpoints round into the same cell would otherwise
+        // overwrite each other and vanish - leaving the random 1x1/1x2 gaps. When the preferred
+        // cell is already claimed, the wedge is keyed to the nearest still-free cell it actually
+        // covers (the cell is only storage - the wedge's own world-space data renders and
+        // collides wherever its geometry is).
+        Set<BlockPos> usedCells = new HashSet<>();
+        for (int wLayer = minW; wLayer <= maxW; wLayer++) {
+            for (int vCol = minV; vCol <= maxV; vCol++) {
+                List<ArchWedge> ringWedges = new ArrayList<>();
+                for (int i = 0; i < count; i++) {
+                    // The Bezier wall arch keys one ~1m voussoir per curve step, each shifted into
+                    // its depth column and rise layer (translate the whole curve); the circular
+                    // bow uses the shared-radius concentric-ring layout (radius + layer offset).
+                    BlockPos cell;
+                    if (bezier != null) {
+                        Vec3 offset = v.scale(vCol).add(rise.scale(wLayer));
+                        BezierBlockData data = BezierGeometry.blockData(bezier, i, offset);
+                        cell = cellOf(BezierGeometry.wedgeCenter(data));
+                        if (!ringWedges.isEmpty()) {
+                            ArchWedge last = ringWedges.get(ringWedges.size() - 1);
+                            if (last.cell().equals(cell)) {
+                                // The next voussoir lands in the same cell: merge it into the
+                                // previous wedge (same ring - just a longer curve slice).
+                                BezierBlockData d = last.bezier();
+                                ringWedges.set(ringWedges.size() - 1, new ArchWedge(null,
+                                        BezierGeometry.extend(d, data.t1() - d.t1()), cell));
+                                continue;
+                            }
+                        }
+                        cell = freeCellFor(data, cell, usedCells);
+                        usedCells.add(cell);
+                        ringWedges.add(new ArchWedge(null, data, cell));
+                        continue;
+                    }
+                    ArchBlockData base = ArchGeometry.blockData(arch, i, count);
+                    // Offset the wedge into its depth column (shift the circle center along v)
+                    // and radial layer (its own centerline radius), so columns and layers tile
+                    // without gaps.
+                    ArchBlockData data = new ArchBlockData(
+                            base.ox() + v.x * vCol, base.oy() + v.y * vCol, base.oz() + v.z * vCol,
+                            base.ux(), base.uy(), base.uz(),
+                            base.wx(), base.wy(), base.wz(),
+                            base.thetaStart(), base.deltaTheta(), base.radius() + wLayer);
+                    cell = cellOf(ArchGeometry.wedgeCenter(data));
+                    if (!ringWedges.isEmpty()) {
+                        ArchWedge last = ringWedges.get(ringWedges.size() - 1);
+                        if (last.cell().equals(cell)) {
+                            // The next voussoir lands in the same cell: merge it into the previous
+                            // wedge (same ring, so same radius/depth - just a wider angular slice).
+                            ArchBlockData d = last.arch();
+                            ringWedges.set(ringWedges.size() - 1, new ArchWedge(new ArchBlockData(
+                                    d.ox(), d.oy(), d.oz(),
+                                    d.ux(), d.uy(), d.uz(),
+                                    d.wx(), d.wy(), d.wz(),
+                                    d.thetaStart(), d.deltaTheta() + data.deltaTheta(), d.radius()),
+                                    null, cell));
+                            continue;
+                        }
+                    }
+                    cell = freeCellFor(data, cell, usedCells);
+                    usedCells.add(cell);
+                    ringWedges.add(new ArchWedge(data, null, cell));
+                }
+                wedges.addAll(ringWedges);
+            }
+        }
+
+        // Undo: every region cell is restored (the row is replaced by the arch - cells under the
+        // arc open up, cells on the arc hold a wedge), and wedge cells OUTSIDE the region (the
+        // arc rose above the row) are captured too so undo clears them as well.
+        Set<BlockPos> wedgeCells = new HashSet<>();
+        for (ArchWedge wd : wedges) {
+            wedgeCells.add(wd.cell());
+        }
+        List<BlockChange> changes = new ArrayList<>();
+        for (BlockPos pos : BlockPos.betweenClosed(min, max)) {
+            BlockPos cell = pos.immutable();
+            changes.add(capture(level, cell, wedgeCells.contains(cell) ? cell : null));
+            level.setBlock(cell, Blocks.AIR.defaultBlockState(), 3);
+            if (RotationStore.get(level, cell) != null) {
+                RotationStore.remove(level, cell);
+            }
+        }
+        for (ArchWedge wd : wedges) {
+            if (wd.cell().getX() >= min.getX() && wd.cell().getX() <= max.getX()
+                    && wd.cell().getY() >= min.getY() && wd.cell().getY() <= max.getY()
+                    && wd.cell().getZ() >= min.getZ() && wd.cell().getZ() <= max.getZ()) {
+                continue;
+            }
+            if (wedgeCells.contains(wd.cell())) {
+                changes.add(capture(level, wd.cell(), wd.cell()));
+                wedgeCells.remove(wd.cell());
+            }
+            level.setBlock(wd.cell(), Blocks.AIR.defaultBlockState(), 3);
+        }
+        for (ArchWedge wd : wedges) {
+            BlockState state = cellStates.getOrDefault(wd.cell(), fallback);
+            if (wd.bezier() != null) {
+                RotationStore.set(level, wd.cell(), new RotationData(state, 0.0f, 0.0f, false,
+                        BezierGeometry.wedgeCenter(wd.bezier()), null, null, wd.bezier()));
+            } else {
+                RotationStore.set(level, wd.cell(), new RotationData(state, 0.0f, 0.0f, false,
+                        ArchGeometry.wedgeCenter(wd.arch()), wd.arch(), null, null));
+            }
+        }
+        return changes;
     }
 
     // ------------------------------------------------------------------
@@ -614,7 +753,7 @@ public final class BuilderServerHandler {
                 Vec3 wedgeCenter = EllipseGeometry.wedgeCenter(data);
                 BlockPos cell = cellOf(wedgeCenter);
                 BlockState state = cellStates.getOrDefault(cell, level.getBlockState(cell));
-                RotationStore.set(level, cell, new RotationData(state, 0.0f, 0.0f, false, wedgeCenter, null, data));
+                RotationStore.set(level, cell, new RotationData(state, 0.0f, 0.0f, false, wedgeCenter, null, data, null));
                 wedges++;
             }
         }
@@ -638,6 +777,96 @@ public final class BuilderServerHandler {
     /** The cell containing the given world-space point. */
     private static BlockPos cellOf(Vec3 point) {
         return new BlockPos((int) Math.floor(point.x), (int) Math.floor(point.y), (int) Math.floor(point.z));
+    }
+
+    /**
+     * The storage cell of a wedge: its centreline-midpoint cell if still free, otherwise the
+     * nearest free cell it actually covers (cells of its 8 corners first, then an expanding
+     * cube around the midpoint). The cell merely keys the wedge in the per-cell RotationStore -
+     * rendering and collision use the wedge's own world-space data - so re-keying cannot change
+     * the arch, it only prevents two wedges from overwriting each other (the random gaps).
+     * {@code used} is mutated: the returned cell is claimed.
+     */
+    private static BlockPos freeCellFor(BezierBlockData data, BlockPos preferred, Set<BlockPos> used) {
+        if (!used.contains(preferred)) {
+            return preferred;
+        }
+        Vec3 center = BezierGeometry.wedgeCenter(data);
+        List<BlockPos> candidates = new ArrayList<>();
+        for (Vec3 corner : BezierGeometry.wedgeVertices(data)) {
+            candidates.add(cellOf(corner));
+        }
+        for (int r = 1; r <= 3; r++) {
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dy = -r; dy <= r; dy++) {
+                    for (int dz = -r; dz <= r; dz++) {
+                        if (Math.max(Math.abs(dx), Math.max(Math.abs(dy), Math.abs(dz))) != r) {
+                            continue;
+                        }
+                        candidates.add(preferred.offset(dx, dy, dz));
+                    }
+                }
+            }
+        }
+        BlockPos best = null;
+        double bestDist = Double.POSITIVE_INFINITY;
+        for (BlockPos candidate : candidates) {
+            if (used.contains(candidate)) {
+                continue;
+            }
+            double dist = candidate.getCenter().distanceToSqr(center);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = candidate;
+            }
+        }
+        if (best != null) {
+            return best;
+        }
+        // Pathological density: nothing free nearby. Keep the preferred cell - the wedge is
+        // still rendered and collided (its data is world-space); only the per-cell store
+        // overwrites, which is preferable to silently dropping a wedge.
+        return preferred;
+    }
+
+    /** See {@link #freeCellFor(BezierBlockData, BlockPos, Set)}; the circular bow variant. */
+    private static BlockPos freeCellFor(ArchBlockData data, BlockPos preferred, Set<BlockPos> used) {
+        if (!used.contains(preferred)) {
+            return preferred;
+        }
+        Vec3 center = ArchGeometry.wedgeCenter(data);
+        List<BlockPos> candidates = new ArrayList<>();
+        for (Vec3 corner : ArchGeometry.wedgeVertices(data)) {
+            candidates.add(cellOf(corner));
+        }
+        for (int r = 1; r <= 3; r++) {
+            for (int dx = -r; dx <= r; dx++) {
+                for (int dy = -r; dy <= r; dy++) {
+                    for (int dz = -r; dz <= r; dz++) {
+                        if (Math.max(Math.abs(dx), Math.max(Math.abs(dy), Math.abs(dz))) != r) {
+                            continue;
+                        }
+                        candidates.add(preferred.offset(dx, dy, dz));
+                    }
+                }
+            }
+        }
+        BlockPos best = null;
+        double bestDist = Double.POSITIVE_INFINITY;
+        for (BlockPos candidate : candidates) {
+            if (used.contains(candidate)) {
+                continue;
+            }
+            double dist = candidate.getCenter().distanceToSqr(center);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = candidate;
+            }
+        }
+        if (best != null) {
+            return best;
+        }
+        return preferred;
     }
 
     /** The span (max - min) of the region's cell centres projected onto the unit vector. */

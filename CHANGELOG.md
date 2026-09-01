@@ -2,6 +2,30 @@
 
 All notable changes to Builder Tools are documented in this file.
 
+## [0.2.3] — 2026-09-01
+
+### Added
+
+- **Bezier wall arches** — wide walls now bow as a smooth curved band instead of a simple bow.
+  The arch follows a quadratic Bezier curve from the wall's root to the click destination, pulled
+  through the extended wall itself: the curve leaves the wall parallel to it (no early bend),
+  arcs smoothly toward the click, and every depth column of the wall becomes its own curving row
+  of voussoirs - multi-block-wide walls keep their whole body as a solid, gap-free curved band.
+- **Far-side clicks** — clicking beyond the wall's end (no perpendicular offset) bows the wall
+  around its far edge, with the bend easing in along the span so the first blocks stay nearly
+  straight.
+- **Arch/ring editing** — you can now place blocks flush against a voussoir's curved faces,
+  thickening an arch or extending a ring outward block by block.
+
+### Changed
+
+- **Arch mode is now a toggle (ALT+A or ALT+C)** — the mode stays on after you release the
+  chord: RMB places the row blocks, LMB-drag stretches the row, moving the mouse bends the live
+  green ghost, and LMB commits the arch. Press the chord again to leave.
+- The arch/ellipse ghost preview and the committed geometry share one server-side derivation
+  (`ArchGeometry.regionArch`), so the curve shown while aiming is exactly what the click
+  produces - including the Bezier band, the fan fallback and the circular bow.
+
 ## [0.2.2] — 2026-08-31
 
 ### Added
@@ -104,6 +128,7 @@ All notable changes to Builder Tools are documented in this file.
   1.21.1 and 26.2: in-world selection, copy/paste, fill, undo, full entity manipulation and a
   WorldEdit-style command set.
 
+[0.2.3]: https://github.com/favasur/Minecraft-Builder-Tools/releases/tag/0.2.3
 [0.2.2]: https://github.com/favasur/Minecraft-Builder-Tools/releases/tag/0.2.2
 [0.2.0]: https://github.com/favasur/Minecraft-Builder-Tools/releases/tag/0.2.0
 [0.1.4]: https://github.com/favasur/Minecraft-Builder-Tools/releases/tag/0.1.4

@@ -29,3 +29,7 @@ client-log.txt
 client-launch.log
 icon.png
 .freebuff/
+
+# Minecraft run logs
+logs/
+run-client.log

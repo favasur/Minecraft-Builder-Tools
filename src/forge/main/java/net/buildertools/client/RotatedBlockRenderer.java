@@ -4,6 +4,7 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.VertexConsumer;
 import net.buildertools.server.RotationStore;
 import net.buildertools.util.ArchGeometry;
+import net.buildertools.util.BezierGeometry;
 import net.buildertools.util.EllipseGeometry;
 import net.buildertools.util.FreeBlockRaycast;
 import net.buildertools.util.OffGridTransform;
@@ -105,6 +106,16 @@ public final class RotatedBlockRenderer {
                 VertexConsumer ellipseConsumer = buffers.getBuffer(
                         net.minecraft.client.renderer.ItemBlockRenderTypes.getRenderType(state, false));
                 RotatedBlockRendering.renderWorldQuads(state, poseStack.last(), ellipseConsumer,
+                        minecraft.level, quads);
+                poseStack.popPose();
+                continue;
+            }
+            if (rot.bezier() != null) {
+                poseStack.pushPose();
+                List<BakedQuad> quads = BezierGeometry.wedgeQuads(rot.bezier(), state);
+                VertexConsumer bezierConsumer = buffers.getBuffer(
+                        net.minecraft.client.renderer.ItemBlockRenderTypes.getRenderType(state, false));
+                RotatedBlockRendering.renderWorldQuads(state, poseStack.last(), bezierConsumer,
                         minecraft.level, quads);
                 poseStack.popPose();
                 continue;

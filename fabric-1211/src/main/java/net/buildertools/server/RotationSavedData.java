@@ -1,6 +1,7 @@
 package net.buildertools.server;
 
 import net.buildertools.util.ArchBlockData;
+import net.buildertools.util.BezierBlockData;
 import net.buildertools.util.EllipseBlockData;
 import net.buildertools.util.RotationData;
 import net.minecraft.commands.arguments.blocks.BlockStateParser;
@@ -102,9 +103,21 @@ public class RotationSavedData extends SavedData {
                             e.getDouble(11), e.getDouble(12));
                 }
             }
+            BezierBlockData bezier = null;
+            if (entry.contains("bezier", Tag.TAG_LIST)) {
+                ListTag bz = entry.getList("bezier", Tag.TAG_DOUBLE);
+                if (bz.size() >= 14) {
+                    bezier = new BezierBlockData(
+                            bz.getDouble(0), bz.getDouble(1), bz.getDouble(2),
+                            bz.getDouble(3), bz.getDouble(4), bz.getDouble(5),
+                            bz.getDouble(6), bz.getDouble(7), bz.getDouble(8),
+                            bz.getDouble(9), bz.getDouble(10), bz.getDouble(11),
+                            bz.getDouble(12), bz.getDouble(13));
+                }
+            }
             data.rotations.put(new BlockPos((int) pos[0], (int) pos[1], (int) pos[2]),
                     new RotationData(state, entry.getFloat("yaw"), entry.getFloat("pitch"),
-                            entry.getBoolean("billboard"), center, arch, ellipse));
+                            entry.getBoolean("billboard"), center, arch, ellipse, bezier));
         }
         return data;
     }
@@ -139,6 +152,25 @@ public class RotationSavedData extends SavedData {
                 a.add(DoubleTag.valueOf(arch.deltaTheta()));
                 a.add(DoubleTag.valueOf(arch.radius()));
                 entry.put("arch", a);
+            }
+            BezierBlockData bezier = e.getValue().bezier();
+            if (bezier != null) {
+                ListTag bz = new ListTag();
+                bz.add(DoubleTag.valueOf(bezier.ax()));
+                bz.add(DoubleTag.valueOf(bezier.ay()));
+                bz.add(DoubleTag.valueOf(bezier.az()));
+                bz.add(DoubleTag.valueOf(bezier.cx()));
+                bz.add(DoubleTag.valueOf(bezier.cy()));
+                bz.add(DoubleTag.valueOf(bezier.cz()));
+                bz.add(DoubleTag.valueOf(bezier.bx()));
+                bz.add(DoubleTag.valueOf(bezier.by()));
+                bz.add(DoubleTag.valueOf(bezier.bz()));
+                bz.add(DoubleTag.valueOf(bezier.vx()));
+                bz.add(DoubleTag.valueOf(bezier.vy()));
+                bz.add(DoubleTag.valueOf(bezier.vz()));
+                bz.add(DoubleTag.valueOf(bezier.t0()));
+                bz.add(DoubleTag.valueOf(bezier.t1()));
+                entry.put("bezier", bz);
             }
             EllipseBlockData ellipse = e.getValue().ellipse();
             if (ellipse != null) {

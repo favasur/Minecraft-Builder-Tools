@@ -1,0 +1,13 @@
+allprojects {
+    afterEvaluate { p ->
+        if (p.plugins.hasPlugin('java')) {
+            p.tasks.register('dumpCp') {
+                doLast {
+                    def cp = p.sourceSets.main.compileClasspath.files.collect { it.absolutePath }
+                    new File(p.rootDir, "scripts/classpath.txt").text = cp.join(java.io.File.pathSeparator)
+                    println("dumped classpath (" + cp.size() + " entries)")
+                }
+            }
+        }
+    }
+}

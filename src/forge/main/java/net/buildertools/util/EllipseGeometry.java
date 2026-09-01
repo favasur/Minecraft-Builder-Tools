@@ -219,21 +219,18 @@ public final class EllipseGeometry {
     }
 
     /**
-     * The 12 triangles of the closed wedge surface (6 faces x 2), in world space. Used verbatim
-     * for the exact-mesh collision and raycast paths.
+     * The triangles of the closed wedge surface (2 per face), in world space. Used verbatim for
+     * the exact-mesh collision and raycast paths - the arc faces are tessellated, so the ring
+     * collides (and is hit by placement/raycasts) as a smooth curve.
      */
     public static List<MeshCollisionShape.Tri> wedgeTriangles(EllipseBlockData d) {
-        Vec3[] v = wedgeVertices(d);
-        List<MeshCollisionShape.Tri> tris = new ArrayList<>(12);
-        for (int[] face : ArchGeometry.wedgeFaces()) {
-            Vec3 p0 = v[face[0]];
-            Vec3 p1 = v[face[1]];
-            Vec3 p2 = v[face[2]];
-            Vec3 p3 = v[face[3]];
+        List<MeshCollisionShape.Tri> tris = new ArrayList<>(4 * ArchGeometry.ARC_SUBDIVISIONS + 4);
+        for (ArchGeometry.WedgeFace face : wedgeFaces(d)) {
+            Vec3[] c = face.corners();
             tris.add(new MeshCollisionShape.Tri(
-                    p0.x, p0.y, p0.z, p1.x, p1.y, p1.z, p2.x, p2.y, p2.z));
+                    c[0].x, c[0].y, c[0].z, c[1].x, c[1].y, c[1].z, c[2].x, c[2].y, c[2].z));
             tris.add(new MeshCollisionShape.Tri(
-                    p0.x, p0.y, p0.z, p2.x, p2.y, p2.z, p3.x, p3.y, p3.z));
+                    c[0].x, c[0].y, c[0].z, c[2].x, c[2].y, c[2].z, c[3].x, c[3].y, c[3].z));
         }
         return tris;
     }
@@ -257,56 +254,103 @@ public final class EllipseGeometry {
         return sum;
     }
 
-    /**
-     * The six textured quads of the wedge for the renderer (world-space positions, same layout as
-     * the arch renderer). The shared end-radial face is nudged a hair inward (along -tangent) so
-     * it cannot z-fight with the next voussoir's coincident start face. Texture mapping
-     * approximates the block texture per face (top on the outer arc, bottom on the inner arc,
-     * side textures on the joints and ends), stretched over the face.
-     */
-    public static List<BakedQuad> wedgeQuads(EllipseBlockData d, BlockState state) {
-        Vec3[] v = wedgeVertices(d);
-        double t1 = d.thetaStart() + d.deltaTheta();
-        Vec3 inward = tangent(d, t1).scale(-1.0); // the end face's outward is +tangent
-        double nudge = 0.0005;
-        for (int i : new int[]{2, 3, 6, 7}) { // C, D, G, H: the whole end-radial edge
-            v[i] = v[i].add(inward.scale(nudge));
+    /** The wedge surface as quads (same layout as {@link ArchGeometry#wedgeFaces(ArchBlockData)}),
+     *  tessellated along the ellipse parameter with every corner exactly on the ellipse and the
+     *  0.5m radial offset along the exact outward normal, so the ring renders as a smooth curve. */
+    public static List<ArchGeometry.WedgeFace> wedgeFaces(EllipseBlockData d) {
+        int n = ArchGeometry.ARC_SUBDIVISIONS;
+        double t0 = d.thetaStart();
+        double t1 = t0 + d.deltaTheta();
+        double h = EllipseBlockData.DEPTH_HALF;
+        Vec3 v = new Vec3(d.ux(), d.uy(), d.uz()).cross(new Vec3(d.wx(), d.wy(), d.wz()));
+        Vec3[][] inner = new Vec3[n + 1][2];
+        Vec3[][] outer = new Vec3[n + 1][2];
+        double[] cumInner = new double[n + 1];
+        double[] cumOuter = new double[n + 1];
+        double[] cumMid = new double[n + 1];
+        for (int i = 0; i <= n; i++) {
+            double t = t0 + (t1 - t0) * i / n;
+            Vec3 p = centerline(d, t);
+            Vec3 nn = normalAt(d, t);
+            Vec3 pi = p.subtract(nn.scale(h));
+            Vec3 po = p.add(nn.scale(h));
+            inner[i][0] = pi.subtract(v.scale(h));
+            inner[i][1] = pi.add(v.scale(h));
+            outer[i][0] = po.subtract(v.scale(h));
+            outer[i][1] = po.add(v.scale(h));
+            // The tile phase is measured from the ellipse's theta=0 (its own axes), not this
+            // wedge's own thetaStart, so the texture continues seamlessly across voussoir seams
+            // and around the whole loop instead of restarting every ~1m (the stretched-stripe
+            // look). putVertex wraps the phase into [0,1) per meter, so the pattern tiles once
+            // per meter along the perimeter.
+            cumInner[i] = arcLength(d.a(), d.b(), 0.0, t);
+            cumOuter[i] = cumInner[i];
+            cumMid[i] = cumInner[i];
+        }
+        // The end-radial edge is shared with the next voussoir's start edge; nudge it inward
+        // (the ellipse's end face outward is +tangent, so inward is -tangent) so the coincident
+        // faces cannot z-fight.
+        Vec3 inward = tangent(d, t1).scale(-1.0);
+        for (int i : new int[]{n}) {
+            inner[i][0] = inner[i][0].add(inward.scale(0.0005));
+            inner[i][1] = inner[i][1].add(inward.scale(0.0005));
+            outer[i][0] = outer[i][0].add(inward.scale(0.0005));
+            outer[i][1] = outer[i][1].add(inward.scale(0.0005));
         }
 
-        double innerArc = arcLength(d.a() - 0.5, d.b() - 0.5, d.thetaStart(), t1);
-        double outerArc = arcLength(d.a() + 0.5, d.b() + 0.5, d.thetaStart(), t1);
-        double midArc = arcLength(d.a(), d.b(), d.thetaStart(), t1);
-        double[][] uvs = {
-                {0.0, 0.0, innerArc, 0.0, innerArc, 1.0, 0.0, 1.0},      // inner
-                {0.0, 0.0, 0.0, 1.0, outerArc, 1.0, outerArc, 0.0},      // outer
-                {0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0, 0.0},                // start radial
-                {0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0},                // end radial
-                {0.0, 0.0, 0.0, 1.0, midArc, 1.0, midArc, 0.0},          // back depth
-                {0.0, 0.0, midArc, 0.0, midArc, 1.0, 0.0, 1.0}           // front depth
-        };
-        Direction[] dirs = {Direction.DOWN, Direction.UP, Direction.NORTH, Direction.NORTH, Direction.NORTH, Direction.NORTH};
+        List<ArchGeometry.WedgeFace> faces = new ArrayList<>(4 * n + 2);
+        for (int i = 0; i < n; i++) {
+            // inner arc face (toward the ring's inside)
+            faces.add(new ArchGeometry.WedgeFace(new Vec3[]{inner[i][0], inner[i + 1][0], inner[i + 1][1], inner[i][1]},
+                    new double[]{cumInner[i], cumInner[i + 1], cumInner[i + 1], cumInner[i]},
+                    new double[]{0, 0, 1, 1}, ArchGeometry.FACE_INNER));
+            // outer arc face (away from the ring's inside)
+            faces.add(new ArchGeometry.WedgeFace(new Vec3[]{outer[i][0], outer[i][1], outer[i + 1][1], outer[i + 1][0]},
+                    new double[]{cumOuter[i], cumOuter[i], cumOuter[i + 1], cumOuter[i + 1]},
+                    new double[]{0, 1, 1, 0}, ArchGeometry.FACE_OUTER));
+            // back depth face (-v)
+            faces.add(new ArchGeometry.WedgeFace(new Vec3[]{inner[i][0], outer[i][0], outer[i + 1][0], inner[i + 1][0]},
+                    new double[]{cumMid[i], cumMid[i], cumMid[i + 1], cumMid[i + 1]},
+                    new double[]{0, 1, 1, 0}, ArchGeometry.FACE_BACK));
+            // front depth face (+v)
+            faces.add(new ArchGeometry.WedgeFace(new Vec3[]{inner[i][1], inner[i + 1][1], outer[i + 1][1], outer[i][1]},
+                    new double[]{cumMid[i], cumMid[i + 1], cumMid[i + 1], cumMid[i]},
+                    new double[]{0, 0, 1, 1}, ArchGeometry.FACE_FRONT));
+        }
+        // start radial face (flat): A, E, F, B
+        faces.add(new ArchGeometry.WedgeFace(new Vec3[]{inner[0][0], inner[0][1], outer[0][1], outer[0][0]},
+                new double[]{0, 0, 1, 1}, new double[]{0, 1, 1, 0}, ArchGeometry.FACE_START));
+        // end radial face (flat, nudged): D, C, G, H
+        faces.add(new ArchGeometry.WedgeFace(new Vec3[]{inner[n][0], outer[n][0], outer[n][1], inner[n][1]},
+                new double[]{0, 1, 1, 0}, new double[]{0, 0, 1, 1}, ArchGeometry.FACE_END));
+        return faces;
+    }
 
-        List<BakedQuad> quads = new ArrayList<>(6);
-        int[][] faces = ArchGeometry.wedgeFaces();
-        for (int f = 0; f < 6; f++) {
-            int[] face = faces[f];
-            Vec3 p0 = v[face[0]];
-            Vec3 p1 = v[face[1]];
-            Vec3 p2 = v[face[2]];
-            Vec3 p3 = v[face[3]];
-            TextureAtlasSprite sprite = ArchGeometry.spriteFor(state, dirs[f]);
+    /**
+     * The textured quads of the wedge for the renderer (world-space positions, tessellated along
+     * the ellipse so the ring renders as a smooth curve). Texture mapping approximates the block
+     * texture per face (top on the outer arc, bottom on the inner arc, side textures on the
+     * joints and ends), tiling once per meter (see {@link ArchGeometry#putVertex}).
+     */
+    public static List<BakedQuad> wedgeQuads(EllipseBlockData d, BlockState state) {
+        Direction[] spriteDirs = {Direction.DOWN, Direction.UP, Direction.NORTH, Direction.NORTH,
+                Direction.NORTH, Direction.NORTH};
+        List<BakedQuad> quads = new ArrayList<>(4 * ArchGeometry.ARC_SUBDIVISIONS + 2);
+        for (ArchGeometry.WedgeFace face : wedgeFaces(d)) {
+            Vec3[] c = face.corners();
+            TextureAtlasSprite sprite = ArchGeometry.spriteFor(state, spriteDirs[face.kind()]);
             if (sprite == null) {
                 continue;
             }
             Direction cull = Direction.getNearest(
-                    (float) outwardNormal(p0, p1, p2).x,
-                    (float) outwardNormal(p0, p1, p2).y,
-                    (float) outwardNormal(p0, p1, p2).z);
+                    (float) outwardNormal(c[0], c[1], c[2]).x,
+                    (float) outwardNormal(c[0], c[1], c[2]).y,
+                    (float) outwardNormal(c[0], c[1], c[2]).z);
             int[] vertices = new int[32];
-            ArchGeometry.putVertex(vertices, 0, p0, (float) uvs[f][0], (float) uvs[f][1], sprite);
-            ArchGeometry.putVertex(vertices, 1, p1, (float) uvs[f][2], (float) uvs[f][3], sprite);
-            ArchGeometry.putVertex(vertices, 2, p2, (float) uvs[f][4], (float) uvs[f][5], sprite);
-            ArchGeometry.putVertex(vertices, 3, p3, (float) uvs[f][6], (float) uvs[f][7], sprite);
+            ArchGeometry.putVertex(vertices, 0, c[0], (float) face.u()[0], (float) face.v()[0], sprite);
+            ArchGeometry.putVertex(vertices, 1, c[1], (float) face.u()[1], (float) face.v()[1], sprite);
+            ArchGeometry.putVertex(vertices, 2, c[2], (float) face.u()[2], (float) face.v()[2], sprite);
+            ArchGeometry.putVertex(vertices, 3, c[3], (float) face.u()[3], (float) face.v()[3], sprite);
             quads.add(new BakedQuad(vertices, -1, cull, sprite, true));
         }
         return quads;

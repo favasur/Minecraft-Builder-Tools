@@ -47,13 +47,13 @@ public final class RotationStore {
                 + ") yaw=" + data.yaw() + " pitch=" + data.pitch());
         RotationSavedData.of(level).set(pos, data);
         broadcast(level, new RotationSyncPacket(pos, data.state(), data.yaw(), data.pitch(), data.billboard(), false,
-                c.x, c.y, c.z, data.arch(), data.ellipse()));
+                c.x, c.y, c.z, data.arch(), data.ellipse(), data.bezier()));
     }
 
     /** Removes the rotated block from a cell (its block is being broken or replaced). */
     public static void remove(ServerLevel level, BlockPos pos) {
         if (RotationSavedData.of(level).remove(pos)) {
-            broadcast(level, new RotationSyncPacket(pos, null, 0.0f, 0.0f, false, true, 0.0, 0.0, 0.0, null, null));
+            broadcast(level, new RotationSyncPacket(pos, null, 0.0f, 0.0f, false, true, 0.0, 0.0, 0.0, null, null, null));
         }
     }
 
@@ -63,7 +63,7 @@ public final class RotationStore {
             Vec3 c = e.getValue().center(e.getKey());
             net.buildertools.network.FabricNetwork.sendToPlayer(player, new RotationSyncPacket(e.getKey(), e.getValue().state(), e.getValue().yaw(),
                     e.getValue().pitch(), e.getValue().billboard(), false, c.x, c.y, c.z, e.getValue().arch(),
-                    e.getValue().ellipse()));
+                    e.getValue().ellipse(), e.getValue().bezier()));
         }
     }
 

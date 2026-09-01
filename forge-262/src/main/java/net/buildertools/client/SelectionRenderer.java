@@ -13,6 +13,7 @@ import net.buildertools.item.SmoothToolItem;
 import net.buildertools.client.settings.BuilderSettings;
 import net.buildertools.server.RotationStore;
 import net.buildertools.util.ArchGeometry;
+import net.buildertools.util.BezierGeometry;
 import net.buildertools.util.EllipseGeometry;
 import net.buildertools.util.FullSlabsCompat;
 import net.buildertools.util.FreeBlockRaycast;
@@ -621,6 +622,31 @@ public final class SelectionRenderer {
         if (ra == null) {
             return;
         }
+        VertexConsumer lines = buffers.getBuffer(RenderTypes.lines());
+        int bright = 0xFF5AFF8A;
+        int dim = 0x805AFF8A;
+        if (ra.bezier() != null) {
+            // The Bezier wall arch: the curve from the wall's root (A) to the click destination
+            // (B), pulled by the extended wall (the handle C). The server commits one row of
+            // voussoirs per depth column and rise layer of the wall (the whole curve translated),
+            // so the preview draws the same curve shifted to every column/layer the region
+            // occupies - a multi-wide wall shows its full curved band.
+            BezierGeometry.BezierArch bz = ra.bezier();
+            Vec3 v = bz.v();
+            Vec3 rise = bz.w();
+            int colMin = archColumn(ArchState.regionMin(), ArchState.regionMax(), ra.center(), v, true);
+            int colMax = archColumn(ArchState.regionMin(), ArchState.regionMax(), ra.center(), v, false);
+            int layerMin = archColumn(ArchState.regionMin(), ArchState.regionMax(), ra.center(), rise, true);
+            int layerMax = archColumn(ArchState.regionMin(), ArchState.regionMax(), ra.center(), rise, false);
+            for (int col = colMin; col <= colMax; col++) {
+                for (int layer = layerMin; layer <= layerMax; layer++) {
+                    Vec3 off = v.scale(col).add(rise.scale(layer));
+                    drawBezierCurve(poseStack, lines, bz.a().add(off), bz.c().add(off), bz.b().add(off), bright);
+                    drawBezierBand(poseStack, lines, bz.a().add(off), bz.c().add(off), bz.b().add(off), v, dim);
+                }
+            }
+            return;
+        }
         ArchGeometry.ArchResult arch = ra.arch();
         Vec3 u = arch.u();
         Vec3 w = arch.w();
@@ -631,9 +657,6 @@ public final class SelectionRenderer {
         Vec3 v = u.cross(w);
         double t0 = arch.thetaStart();
         double t1 = t0 - arch.totalAngle();
-        VertexConsumer lines = buffers.getBuffer(RenderTypes.lines());
-        int bright = 0xFF5AFF8A;
-        int dim = 0x805AFF8A;
         int colMin = archColumn(ArchState.regionMin(), ArchState.regionMax(), ra.center(), v, true);
         int colMax = archColumn(ArchState.regionMin(), ArchState.regionMax(), ra.center(), v, false);
         for (int col = colMin; col <= colMax; col++) {
@@ -645,6 +668,54 @@ public final class SelectionRenderer {
         // Rise marker: from the chord midpoint to the apex of the centerline.
         Vec3 apex = o.add(w.scale(arch.radius()));
         drawLine(poseStack, lines, ra.center(), apex, dim);
+    }
+
+    /** Draws one quadratic Bezier curve from {@code a} through handle {@code c} to {@code b} as
+     *  line segments (the centerline of the arch band). */
+    private static void drawBezierCurve(PoseStack poseStack, VertexConsumer lines,
+                                        Vec3 a, Vec3 c, Vec3 b, int color) {
+        int segments = 64;
+        Vec3 prev = null;
+        for (int i = 0; i <= segments; i++) {
+            double t = (double) i / segments;
+            double mt = 1.0 - t;
+            Vec3 p = a.scale(mt * mt).add(c.scale(2.0 * mt * t)).add(b.scale(t * t));
+            if (prev != null) {
+                drawLine(poseStack, lines, prev, p, color);
+            }
+            prev = p;
+        }
+    }
+
+    /** Draws the outer and inner edges of the 1m-thick Bezier band: the centerline offset 0.5m
+     *  along the in-plane normal ({@code v x tangent} normalized), exactly how the voussoir
+     *  corners are placed. */
+    private static void drawBezierBand(PoseStack poseStack, VertexConsumer lines,
+                                       Vec3 a, Vec3 c, Vec3 b, Vec3 v, int color) {
+        int segments = 64;
+        Vec3 prevOuter = null;
+        Vec3 prevInner = null;
+        for (int i = 0; i <= segments; i++) {
+            double t = (double) i / segments;
+            double mt = 1.0 - t;
+            Vec3 p = a.scale(mt * mt).add(c.scale(2.0 * mt * t)).add(b.scale(t * t));
+            Vec3 d = a.scale(-2.0 * mt).add(c.scale(2.0 * (mt - t))).add(b.scale(2.0 * t));
+            double len = d.length();
+            Vec3 tangent = len < 1.0E-9 ? b.subtract(a).normalize() : d.scale(1.0 / len);
+            Vec3 n = v.cross(tangent);
+            double nl = n.length();
+            if (nl > 1.0E-9) {
+                n = n.scale(1.0 / nl);
+            }
+            Vec3 outer = p.add(n.scale(0.5));
+            Vec3 inner = p.subtract(n.scale(0.5));
+            if (prevOuter != null) {
+                drawLine(poseStack, lines, prevOuter, outer, color);
+                drawLine(poseStack, lines, prevInner, inner, color);
+            }
+            prevOuter = outer;
+            prevInner = inner;
+        }
     }
 
     /** The lowest (or highest) column index along the arch's depth axis ({@code v}) among the

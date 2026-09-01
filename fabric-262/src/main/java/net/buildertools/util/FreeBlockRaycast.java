@@ -4,6 +4,7 @@ import net.buildertools.collision.RotatedCollisionProvider;
 import net.buildertools.server.RotationStore;
 import io.github.favasur.smoothterrain.mesh.MeshCollisionShape;
 import net.buildertools.util.ArchGeometry;
+import net.buildertools.util.BezierGeometry;
 import net.buildertools.util.EllipseGeometry;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
@@ -52,6 +53,19 @@ public final class FreeBlockRaycast {
             }
             if (rot.ellipse() != null) {
                 for (MeshCollisionShape.Tri triangle : EllipseGeometry.wedgeTriangles(rot.ellipse())) {
+                    double[] hit = rayTriangle(from, to, triangle);
+                    if (hit == null || hit[0] >= bestT) {
+                        continue;
+                    }
+                    bestT = hit[0];
+                    Vec3 point = from.add(to.subtract(from).scale(hit[0]));
+                    bestHit = new Hit(pos, point, triangleSide(triangle, from, to),
+                            from.distanceToSqr(point));
+                }
+                continue;
+            }
+            if (rot.bezier() != null) {
+                for (MeshCollisionShape.Tri triangle : BezierGeometry.wedgeTriangles(rot.bezier())) {
                     double[] hit = rayTriangle(from, to, triangle);
                     if (hit == null || hit[0] >= bestT) {
                         continue;

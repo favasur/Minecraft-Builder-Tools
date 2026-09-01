@@ -2,6 +2,7 @@ package net.buildertools.network.packet;
 
 import net.buildertools.server.RotationStore;
 import net.buildertools.util.ArchBlockData;
+import net.buildertools.util.BezierBlockData;
 import net.buildertools.util.EllipseBlockData;
 import net.buildertools.util.RotationData;
 import net.minecraft.core.BlockPos;
@@ -20,7 +21,8 @@ import net.minecraftforge.event.network.CustomPayloadEvent;
 public record RotationSyncPacket(BlockPos pos, BlockState state, float yaw, float pitch,
                                  boolean billboard, boolean remove,
                                  double cx, double cy, double cz,
-                                 ArchBlockData arch, EllipseBlockData ellipse) {
+                                 ArchBlockData arch, EllipseBlockData ellipse,
+                                 BezierBlockData bezier) {
     public static RotationSyncPacket decode(FriendlyByteBuf buf) {
         int stateId = buf.readInt();
         BlockState state = stateId < 0 ? null : Block.BLOCK_STATE_REGISTRY.byId(stateId);
@@ -33,9 +35,9 @@ public record RotationSyncPacket(BlockPos pos, BlockState state, float yaw, floa
                 buf.readBoolean(),
                 buf.readDouble(),
                 buf.readDouble(),
-                buf.readDouble(),
-                readArch(buf),
-                readEllipse(buf));
+                buf.readDouble(),                    readArch(buf),
+                    readEllipse(buf),
+                    readBezier(buf));
     }
 
     public void encode(FriendlyByteBuf buf) {
@@ -50,6 +52,41 @@ public record RotationSyncPacket(BlockPos pos, BlockState state, float yaw, floa
         buf.writeDouble(cz());
         writeArch(buf, arch());
         writeEllipse(buf, ellipse());
+        writeBezier(buf, bezier());
+    }
+
+    private static void writeBezier(FriendlyByteBuf buf, BezierBlockData bezier) {
+        if (bezier == null) {
+            buf.writeBoolean(false);
+            return;
+        }
+        buf.writeBoolean(true);
+        buf.writeDouble(bezier.ax());
+        buf.writeDouble(bezier.ay());
+        buf.writeDouble(bezier.az());
+        buf.writeDouble(bezier.cx());
+        buf.writeDouble(bezier.cy());
+        buf.writeDouble(bezier.cz());
+        buf.writeDouble(bezier.bx());
+        buf.writeDouble(bezier.by());
+        buf.writeDouble(bezier.bz());
+        buf.writeDouble(bezier.vx());
+        buf.writeDouble(bezier.vy());
+        buf.writeDouble(bezier.vz());
+        buf.writeDouble(bezier.t0());
+        buf.writeDouble(bezier.t1());
+    }
+
+    private static BezierBlockData readBezier(FriendlyByteBuf buf) {
+        if (!buf.readBoolean()) {
+            return null;
+        }
+        return new BezierBlockData(
+                buf.readDouble(), buf.readDouble(), buf.readDouble(),
+                buf.readDouble(), buf.readDouble(), buf.readDouble(),
+                buf.readDouble(), buf.readDouble(), buf.readDouble(),
+                buf.readDouble(), buf.readDouble(), buf.readDouble(),
+                buf.readDouble(), buf.readDouble());
     }
 
     private static void writeEllipse(FriendlyByteBuf buf, EllipseBlockData ellipse) {
@@ -123,8 +160,9 @@ public record RotationSyncPacket(BlockPos pos, BlockState state, float yaw, floa
                 RotationStore.applyClientSync(
                         payload.pos(),
                         payload.remove() ? null
-                                : new RotationData(payload.state(), payload.yaw(), payload.pitch(), payload.billboard(),
-                                        new Vec3(payload.cx(), payload.cy(), payload.cz()), payload.arch(), payload.ellipse()),
+                        : new RotationData(payload.state(), payload.yaw(), payload.pitch(), payload.billboard(),
+                                new Vec3(payload.cx(), payload.cy(), payload.cz()), payload.arch(), payload.ellipse(),
+                                payload.bezier()),
                         payload.remove());
             }
         });

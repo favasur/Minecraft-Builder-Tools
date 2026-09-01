@@ -25,6 +25,7 @@ files — drop the jar in `mods/` and go.
 | ⌨️ **WorldEdit commands** | `/set`, `/replace`, `/copy`, `/paste`, `/undo` and a dozen more |
 | 🎛️ **Creative panel** | Time, weather, flight speed, no-clip, fullbright — one panel, no commands |
 | 🏔️ **Smooth terrain** | `gamerule smoothTerrain` + `/smoothterrain` for silky movement on slopes |
+| 🏗️ **Arches & rings** | ALT+A arches a row into a smooth voussoir arch; ALT+E turns a region into an elliptical ring |
 
 ---
 
@@ -57,6 +58,47 @@ Place any block rotated freely in 3D, then keep building around it:
 - Click the inner face of a same-material vertical slab to **merge it into a full double slab** —
   the vanilla rule, now in 3D.
 - Every face renders with correct lighting and textures at any angle — no dark or missing faces.
+
+## 🏗️ How to build — arches & rings
+
+Two building mechanics turn plain block rows into smooth, gap-free curves. Every block becomes a
+**voussoir** — a tapered wedge, wider at the top than the bottom — so the arch or ring tiles with
+no cracks and stays exactly 1 m thick. Works with blocks, slabs, stairs, walls and fences.
+
+### Arch a row (ALT + A)
+
+| Step | What to do |
+|---|---|
+| 1. Hold **ALT+A** | Grab any block and hold the chord |
+| 2. Place the row | Right-click to lay blocks along the line while the chord is held |
+| 3. Stretch it | Keep holding ALT+A, press **LMB** and drag the mouse away — the row stretches like the selection tool |
+| 4. Release, then arch | Release LMB, then click any block to the left or right — the row smoothly arches toward it |
+
+Place a **multi-block-wide wall** and it arches into a full curved band — every column of the
+wall becomes its own row of voussoirs.
+
+### Ring a rectangle (ALT + E or ALT + C)
+
+Hold **ALT+E** (or **ALT+C**), place a rectangle of blocks (RMB), then click any block — the
+region becomes a complete, closed elliptical ring. The ring is split by arc length, so every
+voussoir is a uniform 1 m wide whether the ring is round or flat.
+
+### Face-relative tunnels
+
+Both shapes take their orientation from the **block face you click**:
+
+- Click a **wall face** → a vertical arch or ring, standing upright.
+- Click a **floor or ceiling face** → a horizontal one — a tunnel you can walk through.
+
+The shape is generated in the clicked face's plane and extruded along its normal, so you can
+branch arches and tunnels out of any side of a build.
+
+### Live ghost preview
+
+While you aim the final click, a **bright green preview** shows the exact curve — centerline plus
+inner and outer edges — that will be created. It is computed from the block and face under your
+crosshair, so it morphs as you move and disappears when the click would fail. **Undo** restores
+your original wall, wedges and all.
 
 ## 🧟 Entity tool — grab the world and move it
 

@@ -1,6 +1,7 @@
 package net.buildertools.client;
 
 import net.buildertools.util.ArchGeometry;
+import net.buildertools.util.BezierGeometry;
 import net.buildertools.util.EllipseGeometry;
 import net.buildertools.util.RotationData;
 import io.github.favasur.smoothterrain.mesh.MeshCollisionShape;
@@ -123,6 +124,9 @@ public final class RotatedBlockTriangles {
         if (rot.ellipse() != null) {
             return EllipseGeometry.wedgeTriangles(rot.ellipse());
         }
+        if (rot.bezier() != null) {
+            return BezierGeometry.wedgeTriangles(rot.bezier());
+        }
         return triangles(rot.state(), rot.yaw(), rot.pitch(), rot.center(cell), cell, level);
     }
 
@@ -135,6 +139,9 @@ public final class RotatedBlockTriangles {
         }
         if (rot.ellipse() != null) {
             return EllipseGeometry.wedgeTriangles(rot.ellipse());
+        }
+        if (rot.bezier() != null) {
+            return BezierGeometry.wedgeTriangles(rot.bezier());
         }
         return triangles(rot.state(), yaw, pitch, rot.center(cell), cell, level);
     }

@@ -8,6 +8,7 @@ import net.buildertools.collision.RotatedCollisionProvider;
 import net.buildertools.entity.OffGridBlockEntity;
 import net.buildertools.server.RotationStore;
 import net.buildertools.util.ArchGeometry;
+import net.buildertools.util.BezierGeometry;
 import net.buildertools.util.EllipseGeometry;
 import net.buildertools.util.RotationData;
 import net.minecraft.core.BlockPos;
@@ -108,6 +109,14 @@ public interface CollisionGetterMixin {
                         EllipseGeometry.wedgeTriangles(rot.ellipse()));
                 if (!ellipseShape.isEmpty() && ellipseShape.bounds().intersects(box)) {
                     shapes.add(ellipseShape);
+                }
+                continue;
+            }
+            if (rot.bezier() != null) {
+                MeshCollisionShape bezierShape = new MeshCollisionShape(
+                        BezierGeometry.wedgeTriangles(rot.bezier()));
+                if (!bezierShape.isEmpty() && bezierShape.bounds().intersects(box)) {
+                    shapes.add(bezierShape);
                 }
                 continue;
             }

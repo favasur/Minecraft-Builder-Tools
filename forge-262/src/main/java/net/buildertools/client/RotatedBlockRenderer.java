@@ -3,6 +3,7 @@ package net.buildertools.client;
 import com.mojang.blaze3d.vertex.PoseStack;
 import net.buildertools.server.RotationStore;
 import net.buildertools.util.ArchGeometry;
+import net.buildertools.util.BezierGeometry;
 import net.buildertools.util.EllipseGeometry;
 import net.buildertools.util.OffGridTransform;
 import net.buildertools.util.RotationData;
@@ -78,6 +79,14 @@ public final class RotatedBlockRenderer {
             if (rot.ellipse() != null) {
                 poseStack.pushPose();
                 List<BakedQuad> quads = EllipseGeometry.wedgeQuads(rot.ellipse(), state);
+                RotatedBlockRendering.renderWorldQuads(state, poseStack, NeoForgeRenderBuffer.shared(),
+                        minecraft.level, quads);
+                poseStack.popPose();
+                continue;
+            }
+            if (rot.bezier() != null) {
+                poseStack.pushPose();
+                List<BakedQuad> quads = BezierGeometry.wedgeQuads(rot.bezier(), state);
                 RotatedBlockRendering.renderWorldQuads(state, poseStack, NeoForgeRenderBuffer.shared(),
                         minecraft.level, quads);
                 poseStack.popPose();

@@ -5,6 +5,7 @@ import io.github.favasur.smoothterrain.mesh.MeshCollisionShape;
 import net.buildertools.entity.OffGridBlockEntity;
 import net.buildertools.server.RotationStore;
 import net.buildertools.util.ArchGeometry;
+import net.buildertools.util.BezierGeometry;
 import net.buildertools.util.EllipseGeometry;
 import net.buildertools.util.OffGridTransform;
 import net.buildertools.util.RotationData;
@@ -75,6 +76,16 @@ public interface CollisionGetterMixin {
                             EllipseGeometry.wedgeTriangles(rot.ellipse()));
                     if (!ellipseShape.isEmpty() && ellipseShape.bounds().intersects(box)) {
                         shapes.add(ellipseShape);
+                    }
+                }
+                continue;
+            }
+            if (rot.bezier() != null) {
+                if (MeshCollisionScope.isEntityMovement()) {
+                    MeshCollisionShape bezierShape = new MeshCollisionShape(
+                            BezierGeometry.wedgeTriangles(rot.bezier()));
+                    if (!bezierShape.isEmpty() && bezierShape.bounds().intersects(box)) {
+                        shapes.add(bezierShape);
                     }
                 }
                 continue;
