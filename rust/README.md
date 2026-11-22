@@ -11,14 +11,32 @@ release asset and unpack it so that `.horizon/sdk/api/crates/horizon-mod-api` ex
 
 ## What is done
 
-The loader-independent half of the mod is ported and covered by unit tests (`cargo test`, 61 tests):
+The loader-independent half of the mod is ported and covered by unit tests (`cargo test`, 195 tests):
 
 | Rust | Ported from | State |
 |---|---|---|
 | `src/core/pos.rs` — `BlockPos`, `BlockBox`, region predicates | `SelectionManager`, `SelectionStore.Region`, `BlockPos.betweenClosed` | done |
 | `src/core/ops.rs` — `/set`, `/clear`, `/replace`, `/walls`, `/outline`, `/hollow`, `/faces`, `/overlay`, `/center`, `/move`, `/stack` | `server/BuilderCommand.java` | done |
-| `src/core/history.rs` — 50-operation undo/redo | `server/UndoStore.java` | done |
+| `src/core/history.rs` — 50-operation undo/redo, stored packed (15.6 MiB per player at the limits) | `server/UndoStore.java` | done |
 | `src/core/clipboard.rs` — copy/paste | `server/ClipboardStore.java`, `copySelection`/`paste` | done |
+| `src/core/edit.rs` — a change batch packed into palette + column runs for one bulk edit | `ServerHost::edit_blocks` (Horizon's batch route) | done |
+| `src/core/path.rs` — linear objects: a Catmull–Rom path swept with a width, thickness and per-band block slots (road, path, fence) | no Java source; modelled on map-editor linear objects | done |
+| `src/core/polygon.rs` — territorial objects: arbitrary polygon with border band, fill and diagonal hatching, stacked to a depth | no Java source; modelled on map-editor area objects | done |
+| `src/core/preview.rs` — polygonal territory previews: a semi-transparent yellow area with a bright yellow outline, merged per row | no Java source | done |
+| `src/core/wall.rs` — Wall Polygons and Housing Surveyor Stakes: battered walls along any closed outline, built on Enter | no Java source | done |
+| `src/core/survey.rs` — Surveyor Stakes: planted anchors giving an A–B span, a bearing, an angle with turn direction, a vertical extent, path points and a polygon; tagged linear, territory or housing | no Java source | done |
+| `src/core/claim.rs` — Private Territory: owned polygon + `startY`/`endY` band (whole world height by default), 3D overlap rules, build permission, revision counter | no Java source | done |
+| `src/core/map.rs` — every claim shown to **every** player: a feed (owner, name, area, band) plus yellow/amber overlay geometry | no Java source; like FTB Chunks / Open Parties and Claims | done |
+| `src/core/plan.rs` — a build plan: an outline ordered band by band, with the cells the owner may not build dropped | no Java source | done |
+| `src/core/golem.rs` — Iron and Copper Golem minions: player-spawned only, one block per cadence, fetching per `/gamerule GolemFetching` | no Java source | done |
+| `src/core/settings.rs` — one `BuilderSettings` value set (wall, golem, path, territory, reach) with ranges enforced on every write, and the conversions into `WallSpec`, `GolemRules`, `PathStyle` and `Territory` | `client/settings/BuilderSettings.java` | done |
+| `src/core/panel.rs` — the Creative panel's layout: right-hand column, one row per setting, field or button | `CreativeSettingsScreen.java` (layout) | done |
+| `src/ui.rs` — the panel on the client: drawn over the creative inventory, widgets and input | `CreativeSettingsScreen.java` (widgets) | done, not yet seen in game |
+| `src/core/sessions.rs` — per-player state: each UUID's own survey, housing tool, settings and golems, plus the shared claim store, its build-rights check and the owner-only release | `SelectionStore`/`UndoStore` per player, `ClaimManager` | done |
+| `src/core/offgrid.rs` — offset rotatable blocks: yaw/pitch/offset transform with its inverse, snapping, the oriented box a turned block occupies, ray-vs-box, the voxel walk and the nearest-hit raycast | `OffGridTransform.java`, `RotatedBlockTriangles.java`, `collision/RotatedCollisionProvider.java`, `util/FreeBlockRaycast.java` | geometry done; collision and rendering limited by API 0.2 (below) |
+| `src/core/mesher.rs` — smooth meshed terrain: surface nets over a 16³ density field (one vertex per straddling cell, one quad per sign-changing lattice edge) plus the smoothing tool that averages a column's surface height and fills or cuts the difference | bundled `io.github.favasur.smoothterrain` (geometry half), `item/SmoothToolItem.java` | done |
+| `src/hooks.rs` — the game-facing glue: a surveyor-stake right-click plants a housing stake in that player's session, the local player's yellow preview is submitted as world geometry every frame, and `GolemFetching` is read back from its change event | `ClientEvents`, `ServerEvents` (the parts above) | done, not yet seen in game |
+| `data/`, `assets/` — package content: `buildertools:surveyor_stake`, a sign-templated block (player-facing `rotation`/`facing`, thin plate collision) with a post-only model and its default block item | API 0.2 content files, see [CONTENT.md](CONTENT.md) | done |
 | `src/core/arch.rs` — voussoir arch radius, arc split, fan fallback, face frame, wedge corners, `RegionArch::Bezier` | `util/ArchGeometry.java`, `util/FaceFrame.java` | done |
 | `src/core/bezier.rs` — quadratic Bézier band, arc-length split, extension, surface | `util/BezierGeometry.java` | done |
 | `src/core/ellipse.rs` — closed ellipse ring, arc-length boundaries, curvature guard, surface | `util/EllipseGeometry.java` | done |
@@ -26,8 +44,8 @@ The loader-independent half of the mod is ported and covered by unit tests (`car
 | `src/commands.rs` — the command set's parsing and direction words | `server/BuilderCommand.java` | done |
 | `src/lib.rs` — the `Hooks` root | `BuilderToolsMod` | scaffold only |
 
-The region ops, all three curved shapes and the command set are covered by tests: `cargo test` runs
-61 of them, including the shape identities (voussoir tiling, ellipse closure, 1 m thickness), the
+The region ops, all three curved shapes, the off-grid boxes and the mesher are covered by tests:
+`cargo test` runs all 195 of them, including the shape identities (voussoir tiling, ellipse closure, 1 m thickness), the
 tessellation invariants (34 quads and 68 triangles per voussoir, tile-split UV phases, face normals
 on the expected axis) and the numerical checks in `core::fast`.
 
@@ -37,32 +55,189 @@ wide-wall arching and elliptical rings are complete in the core.
 
 ## What is not done yet
 
-`src/lib.rs` implements `Hooks` with no methods wired, so the mod currently loads and does nothing
-in game. Everything below is still Java-only:
+`src/lib.rs` registers the gamerule and wires the game-rule listener, the settings panel and the glue
+in `hooks.rs`. What is still missing, or limited by API 0.2:
 
-* **Hook wiring** — `use_item_on_block`, `left_click_block`, `right_click_block`, `break_block`,
-  `attack_entity`, `visuals`, `screen_render_post`, `register_commands` and `run_mod_command` are
-  implemented by the Java mod's `ClientEvents`, `BuilderCommand` and `ServerEvents`.
-* **Applying edits** — the port computes change batches but does not send them to the world.
-  Horizon's route is `ServerHost::edit_blocks(dimension, &BlockEdit)`; building a `BlockEdit`
-  palette and runs, plus resolving block arguments via `block_state_id`, is the next piece.
-* **Per-player state** — `CommandSource::Player { player, .. }` gives the `PlayerRef` to key the
-  selections, clipboards and histories on.
-* **Rotated / off-grid blocks** — `OffGridBlockEntity`, `OffGridTransform`, `RotatedBlockRenderer`,
-  `RotatedBlockModel`, `RotatedBlockTriangles`, `RotatedSlabPlacement`. The Java mod implements
-  these with mixins into the client render pipeline and a display entity; Horizon exposes render
-  hooks (`visuals`, `frame`) and native draw helpers (`draw_quad`, `draw_cube`), which the port has
-  not used yet.
+* **Tool commands** — the command set is parsed (`src/commands.rs`) and the tools compute, but no
+  command is registered: `register_commands` and `run_mod_command` are not wired, so in game the
+  only way to plant a stake is the surveyor item itself.
+* **Applying edits** — the port computes change batches and packs them (`core::edit::BlockEdit`,
+  equivalence-tested against the per-cell writes), but `edit_blocks` takes host `BlockState`s and
+  the core's `BlockId`s are opaque: the table from one to the other belongs to the tool layer that
+  picks a block, which is the same gap as the commands above.
+* **Preview submission** — wired for what exists: `render_level_stage` submits the local player's
+  housing preview as `WorldQuad`/`WorldLine` geometry. The command tools' previews (paths,
+  territories, arches) appear once those tools can plant their stakes.
+* **Per-player state** — `core::sessions` keys each player's survey, housing tool, settings, golems
+  and held claims on their UUID, and `hooks.rs` plants into it from the click's `player`. Claims are
+  owned by the stable key `player:<uuid-hex>` rather than the display name, so a rename cannot lose
+  one; `claim_area` and `release_claim` enforce ownership.
+* **Rotated / off-grid blocks** — the geometry is ported and tested in `core::offgrid` (transform,
+  inverse, snapping, oriented box, ray test, voxel walk, nearest-hit raycast), but the game side is
+  limited by the build: a content block's `shapes` are axis-aligned boxes only and there is no
+  block-collision hook, so a turned block's *collision* cannot match its model. Rendering is
+  possible (`block_entity_submit` with `native_draw_cube`, or `draw_model_instances` with the 3×4
+  matrix `OffGridTransform::matrix` already returns) and is not wired yet.
 * **Entity tool** — `EntityToolScreen`, `EntityDragState`, `EntityRotateState`, and the server-side
   `moveEntity`/`duplicateEntity`/`freezeEntity`.
+* **Golem entities** — `core::golem` decides everything (who is a minion, what it does each tick,
+  where it fetches from) and `core::sessions` ticks every player's crew with the rule's current
+  value, but no entity is spawned, walked or made to break a block yet: that needs entity spawning
+  (`level_spawn_mob`), a `GolemAction` match in the glue, and the same block-state table as edits.
+  The rule itself is wired both ways: it is registered at load, and `game_rule_changed` stores its
+  new value in `hooks::fetching_enabled()` whenever `/gamerule GolemFetching` is used.
+* **The map HUD** — the claim feed and overlay geometry are ready; drawing a minimap or a sidebar
+  list is client UI the port has not built (see the settings screen above).
 * **Brushes** — `paint`, `scatter`, `smooth` and their preview sphere.
-* **Creative settings screen** — `CreativeSettingsScreen` and `builder settings`. Horizon's mod-owned
-  screens and drawing are still on its roadmap.
-* **Smooth terrain**, sounds, and the mod's network packets.
+* **The settings panel's other halves** — the panel itself is built (below), but Java's screen also
+  sends `WorldSettingsPacket` and `PlayerAbilitiesPacket` and saves the settings to a config file;
+  the port keeps the values in memory and has no packet layer yet.
+* **Smooth terrain in the world** — `core::mesher` has the geometry (surface nets over a density
+  field, plus the smoothing tool's height averaging as an undoable edit), but API 0.2 has no custom
+  terrain mesher and no mesh collision shape, so the game's terrain cannot be replaced by a mesh.
+  `add_section_geometry` can draw arbitrary quads into a section, which is a display-only route the
+  port has not taken. Sounds and the mod's network packets are not ported at all.
 * **Packing the wedge surface into draw calls** (`wedgeQuads`). `wedge.rs` produces the tessellated
   quads with their tile-split UVs and the collision triangles; turning a `TileQuad` plus a
   `FaceKind` into a vertex buffer needs Horizon's block-sprite access, which the port has not wired
   yet. The geometry and UV logic itself is ported and tested.
+
+## Tools beyond the Java mod
+
+Two object classes from map editors (Narodnaya Karta's *линейные* and *площадные* objects) have no
+Java counterpart and are now in the core, because the mod's only curved tools were an arch and an
+ellipse ring:
+
+* **Linear objects** (`core/path.rs`, `/road`, `/path`, `/fence`) — a Catmull–Rom path through the
+  drawn points, swept with a width and a thickness. Every band is a separate block slot
+  (`PathBands::{surface, filler, edge}`), so `road gravel cobble 5 2` lays a 5-wide gravel road two
+  blocks thick over cobble, and `fence oak_fence` lays a one-block line. Sampling is 0.5 blocks, and
+  a test flood-fills the result to prove the surface stays 4-connected through a bend.
+* **Territorial objects** (`core/polygon.rs`, `/territory`, `/poly`) — an arbitrary polygon with a
+  border band, a fill, optional diagonal hatching and a stacking depth. Containment is even-odd (so
+  concave outlines work) and the border is a true distance to the nearest edge, so a 2-block border
+  is 2 cells thick on every side.
+
+Both are data-driven rather than hard-coded: the "sidebar" of a map editor is the `PathStyle` /
+`Territory` value, which a Horizon screen would edit directly once mod screens exist.
+
+### Previews, Housing stakes and Wall Polygons
+
+Every polygonal territory previews the same way (`core/preview.rs`): a semi-transparent yellow area
+(`0x66FFD400`) over the ground it would cover and a bright yellow ring (`0xFFFFFF00`, 3 px) on its
+outline. The fill is merged per row — one quad per horizontal run of covered cells — so a 10 × 10 plot
+costs 10 quads and a 200 × 200 one 200, well inside the client's 4,096-quad budget per view.
+`polygon_preview` serves plain territories and claims alike, and `polygon_band` gives the footprint
+of a wall in the same style.
+
+**Housing Surveyor Stakes** are ordinary stakes tagged `StakeKind::Housing` (`core/survey.rs`), so
+planting, unplanting, the 16-stake cap and the A/B/C labels are shared with the other tools.
+`core::wall::Housing` collects them, the right-side window writes the `WallSpec` (height, thickness,
+batter, cap block), and Enter erects the wall:
+
+* the wall follows every edge of the outline, so a triangle yields a triangular wall and a concave
+  outline its concave shape — no shape is special-cased;
+* corners are mitred once: a cell is wall when its centre is inside the polygon *and* within the
+  course's width of the nearest edge, so two edges meeting at a vertex cannot write the cell twice;
+* each course is `batter` thinner than the one below — the same tapered cross-section the arch and
+  wedge tools build — and the wall closes into a ridge once a course would be thinner than
+  `MIN_COURSE` instead of ending in a sliver;
+* the finished wall is packed into one `BlockEdit` (palette + column runs) for the host's bulk write,
+  and the whole thing is previewed first: footprint band, base outline, and the outline raised to
+  the wall's top with a post at every vertex, so the sidebar's height reads before Enter.
+
+The wall starts at the lowest stake, so a survey planted on a shelf builds on the shelf. A stake sits
+at a block's centre, so a housing outline runs through cell centres; a course's width is measured to
+cell centres exactly as `Border::width` is, which makes a 1-block course two cells deep on the side
+where the outline passes through them.
+
+### Private territories on every player's map
+
+A claim is private in *build rights*, not in *knowledge* — the way FTB Chunks and Open Parties and
+Claims work — so `core/map.rs` gives every player every claim:
+
+* `claim_feed(&store, viewer)` returns all of them with id, owner, name, outline, vertical band,
+  area and a `mine` flag. A stranger sees the same list; only the flag differs.
+* `claim_overlay(&store, viewer, y)` draws them in one `Preview`: the viewer's own in the bright
+  yellow of the territory preview, everyone else's in amber (`0x55FFC000` fill, `0xFFB8860B`
+  outline), so ownership reads without a legend.
+* `ClaimStore::revision` moves only when a claim is made or released — a refused claim changes
+  nothing, so it never looks like news. A client can skip an unchanged list by comparing it.
+* The overlay adds claims only while the view's 4,096-quad/line budgets hold, and counts what it
+  left out in `ClaimOverlay::hidden` rather than quietly hiding a border.
+
+### Golem minions
+
+`core/plan.rs` turns any finished outline (a wall polygon, a painted territory, a region shell) into
+a `BuildPlan` ordered **band by band** — bottom-up and row by row inside a band — so a wall rises
+course by course instead of one tower at a time. `BuildPlan::skip_unbuildable` drops the cells the
+owner may not build, which is how a minion inherits its owner's rights.
+
+`core/golem.rs` is the minion itself:
+
+* **Only a player's golem builds.** `SpawnOrigin::Player` is a minion; a village's or a structure's
+  golem has `SpawnOrigin::World`, refuses every plan and answers `GolemAction::Refused` without
+  touching the world.
+* **Iron vs copper.** One profile table: iron lays a block every 10 ticks, carries 8 and reaches 16
+  blocks; copper is quicker (6 ticks) but carries 4 and reaches 12.
+* **It works block by block:** one `Placed` action per cadence, in plan order, with the change
+  recorded for undo. A fetching golem also refuses to mine its own not-yet-built outline (the plan
+  reserves those positions) or anything inside a claim its owner may not build in.
+* **`/gamerule GolemFetching`** is `GolemRules::fetching`, registered from `Hooks::register` as
+  `buildertools:golem_fetching` in the `buildertools:golems` category (gamerule ids are lower-case
+  resource locations in game; the sidebar and this README keep the readable name). `true` — the
+  golem answers `Fetching { target, block }` with the nearest source within reach, the glue walks it
+  there and breaks it, then hands the block back with `Golem::give`; with nothing in reach it answers
+  `Waiting` and does not conjure blocks. `false` — the block appears in its hands
+  (`BlockAppeared`) and is placed on the next tick.
+
+### Surveyor Stakes and Private Territory
+
+A **Surveyor Stake** is one planted block position; every tool view is derived from the planting
+order (`core/survey.rs`): two stakes give a span and its bearing, three give the angle at the middle
+one with its turn direction, two stacked in one column give the vertical extent, and all of them in
+order give either a linear object's control points (`path_points`) or a territory outline
+(`polygon`). Nothing is stored twice, so a stake is just a block in the world.
+
+A **Private Territory** (`core/claim.rs`) pairs an outline with an owner and an inclusive vertical
+band. With no `startY`/`endY` it takes the whole world height; with them it takes only that band,
+which is what lets a basement be claimed under someone else's plot. Overlap is therefore tested in
+three dimensions — the bands must intersect *and* the outlines must intersect — and a shared border
+counts as touching, not overlapping. `ClaimStore::may_build` is the single permission check a
+placement hook needs.
+
+The stake block and item are declared as package content, not in code:
+`data/buildertools/horizon/block/surveyor_stake.json` is `{ "template": "minecraft:stone" }`, and a
+block gets a block item of its own id by default, so that one file yields both. See
+[CONTENT.md](CONTENT.md) for the full guidelines (layout, templates, components, assets, namespaces,
+validation) — and note that `cargo horizon-mod build` accepted this declaration with the same checks
+the game runs.
+
+### The Creative settings panel
+
+Java builds a 464-line panel onto the creative inventory by subclassing `CreativeModeInventoryScreen`.
+The port splits that in two, and neither half needs the subclass:
+
+* `core/settings.rs` holds every value the tools read — wall height, thickness and batter, the
+golem's fetching rule and kind, path width and height, border width, territory depth, reach — and
+converts each set into the core type that consumes it (`wall_spec`, `golem_rules`, `path_style`,
+`territory`). The defaults equal the core constructors', so a tool used without ever opening the panel
+behaves exactly as before. Every write goes through the row's range: `set_text` **refuses** a value
+outside it rather than clamping a typo (a held ± button clamps, because that is a command and not a
+mistake).
+* `core/panel.rs` lays the column out on the right edge of whatever rectangle the screen reports, one
+row per setting, controls flush right and labels left; a window too short for all ten rows gets the
+ones that fit and a count of the rest, instead of drawing over the inventory.
+* `ui.rs` is the client half. Horizon has no mod-owned screen that can sit beside a vanilla one, so the
+panel is **drawn over the creative inventory** in `screen_render_post` and takes only the input that
+lands on it: a press inside the panel is cancelled so the item grid never sees it, keys and typed
+characters are taken only while one of the panel's widgets has focus (Escape, the inventory key and
+the creative search keep working), and the widgets themselves — focus, Tab, caret, selection — are the
+SDK's own `Widgets` group.
+
+The one visible difference from Java: Horizon's widget set has buttons and text fields but no sliders,
+so a number is typed into its field (its range shows as the field's suggestion) and a toggle or named
+choice is a button that flips or cycles. Both write the same `BuilderSettings`.
 
 See [OPTIMIZATIONS.md](OPTIMIZATIONS.md) for the measured comparison of this mirrored
 implementation against faster alternatives (`core::fast`, `examples/bench.rs`).

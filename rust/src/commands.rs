@@ -6,8 +6,8 @@
 
 use crate::core::pos::BlockPos;
 
-/// One parsed builder command.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// One parsed builder command. `Eq` is gone because a road's width is a fractional block count.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Parsed<'a> {
     Wand,
     Tools,
@@ -37,6 +37,17 @@ pub enum Parsed<'a> {
     ClearInventory,
     ClearEntities { radius: Option<i32> },
     SmoothTerrain,
+    /// A road swept along the drawn path: `surface` on top, `filler` below, `width` wide.
+    Road {
+        surface: &'a str,
+        filler: &'a str,
+        width: f64,
+        height: i32,
+    },
+    /// A one-block linear object: a fence line, a path, a cable run.
+    Fence { block: &'a str },
+    /// A polygonal territory: a border of `border` and an interior of `fill`.
+    Territory { border: &'a str, fill: &'a str },
 }
 
 /// Parses a command invocation. `literals` is the literal path (`["set"]`, `["replace","from"]`)
@@ -98,6 +109,17 @@ pub fn parse<'a>(literals: &[String], args: &[&'a str]) -> Option<Parsed<'a>> {
             },
         },
         "smoothterrain" => Parsed::SmoothTerrain,
+        "road" => Parsed::Road {
+            surface: arg(0)?,
+            filler: arg(1).unwrap_or(arg(0)?),
+            width: arg(2).unwrap_or("3").parse().ok()?,
+            height: arg(3).unwrap_or("1").parse().ok()?,
+        },
+        "fence" | "path" => Parsed::Fence { block: arg(0)? },
+        "territory" | "poly" => Parsed::Territory {
+            border: arg(0)?,
+            fill: arg(1).unwrap_or(arg(0)?),
+        },
         _ => return None,
     })
 }
@@ -133,6 +155,10 @@ pub const USAGES: &[&str] = &[
     "clearinventory",
     "clearentities [radius]",
     "smoothterrain",
+    "road <surface> [filler] [width] [height]",
+    "fence <block>",
+    "path <block>",
+    "territory <border> [fill]",
 ];
 
 /// Resolves a WorldEdit-style direction word. `look` is the player's horizontal facing, used for
@@ -236,6 +262,60 @@ mod tests {
         assert_eq!(
             direction("sideways", BlockPos::new(0, 0, 1)),
             BlockPos::new(0, 0, 1)
+        );
+    }
+
+    #[test]
+    fn linear_and_territory_commands_parse_with_defaults() {
+        let path = lits(&["road"]);
+        assert_eq!(
+            parse(&path, &["minecraft:gravel"]),
+            Some(Parsed::Road {
+                surface: "minecraft:gravel",
+                filler: "minecraft:gravel",
+                width: 3.0,
+                height: 1,
+            })
+        );
+        assert_eq!(
+            parse(&path, &["minecraft:stone_bricks", "minecraft:cobblestone", "5", "2"]),
+            Some(Parsed::Road {
+                surface: "minecraft:stone_bricks",
+                filler: "minecraft:cobblestone",
+                width: 5.0,
+                height: 2,
+            })
+        );
+
+        let path = lits(&["fence"]);
+        assert_eq!(
+            parse(&path, &["minecraft:oak_fence"]),
+            Some(Parsed::Fence {
+                block: "minecraft:oak_fence"
+            })
+        );
+        let path = lits(&["path"]);
+        assert_eq!(
+            parse(&path, &["minecraft:dirt_path"]),
+            Some(Parsed::Fence {
+                block: "minecraft:dirt_path"
+            })
+        );
+
+        let path = lits(&["territory"]);
+        assert_eq!(
+            parse(&path, &["minecraft:stone"]),
+            Some(Parsed::Territory {
+                border: "minecraft:stone",
+                fill: "minecraft:stone"
+            })
+        );
+        assert_eq!(
+            parse(&path, &["minecraft:stone", "minecraft:grass_block"]),
+            Some(Parsed::Territory {
+                border: "minecraft:stone",
+                fill: "minecraft:grass_block"
+            })
         );
     }
 

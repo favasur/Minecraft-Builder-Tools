@@ -1,119 +1,151 @@
-# Could the Rust port do better than the Java architecture?
+# Could the Rust port do better than the architecture it mirrors?
 
-Short answer: **yes, in three places that matter, and no in the places that define the mod's
-behaviour.** The parts worth changing are where the Java code is shaped by the Java Edition
-platform (per-block world writes, a heap-heavy per-player undo, a table-driven arc length). The
-parts that must not change are the shape constants — radius formula, rise caps, thresholds — because
-those define what an existing build looks like.
+**Verdict: yes in two places that are now implemented and measured, no in the shapes themselves,
+and one "obvious" win (the faster arc length) turns out not to be safely usable for commits.** The
+mirrored math is not what is slow; the *shape of the work* is.
 
-Everything below was measured by `cargo run --release --example bench`
-(`rust/examples/bench.rs`). The ratios are what matter; the absolute times are one machine and one
-run, not a benchmark harness. Every alternative implementation used here lives in
-`rust/src/core/fast.rs` and is pinned to the mirrored one by tests before any timing is quoted.
+Everything below comes from `cargo run --release --example bench` and from tests that fail if a
+claim stops holding. Ratios are what matter — absolute times are one machine, one run.
 
-## Measured results
+## Status of each claim
 
-| # | Mirror (as ported from Java) | Alternative | Result |
+| # | Change | Evidence | Risk |
 |---|---|---|---|
-| 1 | `World` reached through a per-position hash map | one dense `Vec<BlockId>` over the selection box | **7–8× faster** on a 32³ fill (≈350 µs vs ≈2.4–3.1 ms) |
-| 2 | ellipse: 8192-sample trapezoid table + binary search per boundary | composite Gauss–Legendre + advancing-panel Newton | **6× / 2× / 15× faster** (a=8,b=3 / a=20,b=19 / circle), *and* more accurate |
-| 3 | `BlockChange` = 20 bytes, one record per block | `u16` ids + one relative box origin (16 bytes), or lane deltas (≈8) | **31.2 MiB → 25 MiB** per player at 50 ops × 32,768 blocks (→ ≈13 MiB with deltas) |
-| 4 | one `setBlock` per cell, each with its own neighbour and light update | one bulk edit of column runs | **32,768 calls → 1,024 runs** for a 32³ box (arithmetic, not timed — see below) |
-| 5 | per-click arch derivation | unchanged | 178 ns/call, i.e. irrelevant; leave it alone |
+| 1 | Bulk edit instead of per-block writes | implemented (`core/edit.rs`), 32× fewer writes, equivalence-tested | low — semantics must match `edit_blocks` |
+| 2 | Packed undo storage | implemented (`core/history.rs`), **15.6 MiB instead of 31.2** | low — pure encoding |
+| 3 | Dense world buffer | measured, **7–8×** on a 32³ fill | low |
+| 4 | Composite Gauss + Newton arc length | measured **5× / 2× / 12×** and more accurate | **not safe for commits** — see below |
+| 5 | Parallel planning | not measured; safe by construction | medium (threading) |
+| 6 | Tessellation reuse | not measured; Java rebuilds per frame | medium |
 
-### Why the arc-length result is a real improvement and not just a faster wrong answer
+## 1. Bulk edit — the real architectural win
 
-The mirrored implementation integrates the perimeter with an 8192-step trapezoid rule. That rule is
-the dominant error in the Java mod's ellipse: against a 1,000,000-interval Simpson reference the
-mirrored perimeter is off in the ~1e-7 relative range, while the composite Gauss result agrees to
-<1e-10. The tests assert exactly that ordering, so the faster path is also the more correct one:
+The Java mod writes a region with one `level.setBlock` per cell. In Java Edition each of those is a
+separate world mutation: block-entity removal, neighbour updates, light engine, chunk-section
+dirtying, then a chunk resend. Horizon instead takes the whole edit at once as a palette plus
+vertical column runs (`ServerHost::edit_blocks`), documented as not notifying neighbours and
+resending changed chunks whole.
 
-* `perimeter_matches_a_dense_reference_and_the_mirrored_table` — Gauss within 1e-10 of the dense
-  reference, and within 1e-6 of the table (the table is the coarse one).
-* `newton_boundaries_land_on_equal_arc_length_steps` — every boundary lands on `m/N` of the total
-  arc length within 1e-9.
-* `gauss_legendre_integrates_a_polynomial_exactly` — the quadrature itself is validated
-  independently (16-point Gauss is exact to degree 31).
+`core/edit.rs` performs that conversion and `BlockEdit::apply` exists so equivalence is tested, not
+asserted:
 
-A 16-point rule over the whole 2π period is *not* enough (the first version was 0.036% off); the
-integrand is analytic but the interval is long, so the panel has to be local. That is why the code
-uses panels of π/4. This is worth writing down because it is the kind of change that looks free and
-is not.
+```
+fill 32^3:  1,024 runs for 32,768 cells (32× fewer writes), 20,484 B of runs, pack 2.9 ms
+walls 32^3:   124 runs for  3,968 cells (32× fewer writes)
+```
 
-## The structural win: stop writing block by block
+Tests: applying a packed edit leaves the world in *exactly* the state the per-cell writes did
+(including a 2-block border), for a solid fill, a wall, and a filtered replace; packing is
+deterministic and ordered; runs stop merging where the id changes.
 
-This is the largest difference and it is not a constant factor.
+**One caveat I will not paper over.** Packing is 2.9 ms of pure CPU for the largest legal operation.
+Reducing 32,768 writes to 1,024 runs is proven; that this is *faster* in wall-clock terms depends on
+what a per-block write costs in Horizon, which I cannot measure from here. The honest statement is:
+the bulk path removes 31,744 world mutations and adds 2.9 ms of local sorting. If a bare write is
+≥0.1 µs, the bulk path wins; it needs the real host to confirm.
 
-The Java mod fills a region with `level.setBlock(...)` in a loop. In Java Edition every one of those
-calls is a separate world mutation: block-entity removal, neighbour updates, light-engine work and
-chunk-section dirtying, then a chunk resend to clients. For a 32,768-block selection that is 32,768
-mutations.
+**A lesson worth recording:** the first packer used a linear scan per change for its column lookup
+and palette, and cost **10.3 ms** — slower than the operation it packed (0.4 ms). Hashing the
+lookups brought it to 2.4 ms; a single flat sort by `(x, z, y)` measured 2.9 ms and was kept for its
+determinism and one allocation less. A "free" constant-factor win is not free until it is measured.
 
-Horizon's mod API takes the whole edit at once — `ServerHost::edit_blocks(dimension, &BlockEdit)`,
-where a `BlockEdit` is a palette plus `BlockRun { x, z, y, height, block, only }` column runs, and
-the documented contract is that no neighbour is told and the changed chunks go to players whole.
-A 32³ selection becomes 1,024 runs instead of 32,768 writes, and the light/neighbour churn
-disappears entirely because it never happens per block.
+## 2. Packed undo — measured, and it corrects my earlier estimate
 
-The port is already shaped for this: `ops::*` returns `Vec<BlockChange>` rather than mutating as it
-goes, so a "changes → runs" packer is a pure function with no behaviour change. That packer is the
-next thing to write, and it is the single highest-value piece of remaining work.
+Fifty operations of a full 32,768-block selection, per player:
 
-## Where the mirrored design is already right
+```
+raw   31.2 MiB  (20 B/cell as the Java record stores it)
+packed 15.6 MiB (2.00×) — u16 offsets from one box origin + u16 palette indices
+```
 
-* **Region ops are pure and testable.** They take a `World` trait, so the same code runs against the
-  game, a dense buffer or a hash map in tests. That is what made findings 1 and 4 measurable at all.
-* **Geometry is deterministic world-space math.** No baked models, no client state; the server
-  commit and the client preview derive from the same function. This is what makes the port
-  verifiable by unit tests, and it is the architecture worth keeping.
-* **The arch derivation is cheap.** 178 ns per click. Optimising it would be noise.
+That is a measured 2.00×, not the 25 MiB / ~13 MiB I estimated earlier from byte arithmetic; the
+earlier figures assumed fields that the real encoding does not need, and the encoded cell is 10
+bytes, not 8. Undo and redo walk the packed cells directly, so restoring an operation allocates
+nothing at all — unlike the Java `List<BlockChange>` that is handed back to the world as-is.
 
-## Where it is *not* worth changing (fidelity constraints)
+Tests: a packed operation restores exactly the previous world (checked over a pre-filled
+two-block pattern so `before` is not uniformly air), and the packed form must stay ≥1.9× smaller
+than the raw batch or the test fails.
 
-These define what an existing build looks like. Changing any of them silently changes saved builds,
-so they stay exactly as the Java mod has them:
+`u16` offsets are exactly sufficient: `MAX_BLOCKS` caps an operation at 32,768 cells, so no offset
+can exceed 32,767.
+
+## 3. Dense buffer vs per-position hash — 7–8×
+
+```
+fill 32^3: dense 372 µs   hash 2.80 ms   (7–8×)
+```
+
+This is a property of the `World` implementation handed to `ops::*`, not of the ported logic, so it
+can be adopted without touching a single operation.
+
+## 4. Arc length: faster, more accurate — and not safely usable for commits
+
+The mirrored ellipse integrates its perimeter with an 8,192-sample trapezoid rule and binary-searches
+the table for every voussoir boundary. Composite Gauss–Legendre with an advancing-panel Newton solve
+is 5×/2×/12× faster (a=8,b=3 / a=20,b=19 / circle) and agrees with a 1,000,000-interval Simpson
+reference to <1e-10, where the table is off in the ~1e-7 range. So it is *better mathematics*.
+
+It still must not replace the table for commits, and the benchmark is what shows why:
+
+```
+ellipse fidelity over 2,304 (a,b) pairs:
+  0 differ in voussoir count
+  5 shift a boundary by more than 1e-6 rad (worst 1.20e-6)
+```
+
+Five of 2,304 shapes would place their voussoir boundaries at measurably different angles. At a=20 a
+1.2e-6 rad shift is 2.4e-5 m — far below a block, so it almost certainly selects the same cells, but
+"almost certainly" is exactly what must not be built on when the output is a player's build. A
+faster path is only usable here once the region builder exists to diff the *resulting block sets*
+against the table's, for every (a,b) pair.
+
+**Recommendation:** keep `build_ellipse` as the commit path; use `core::fast` for previews,
+measurement and any future analysis. This is the single clearest case where better math loses to
+reproducibility.
+
+## 5. Parallel planning — safe by construction, unmeasured
+
+Planning a batch reads the world and writes only its own output, and boxes decompose into disjoint
+columns, so planning can fan out before one serial `edit_blocks` call applies the result. Horizon
+native mods run unsandboxed, so std threads are available; a wasm build could not do this, which is
+an argument for shipping native. Not measured — there is no region planner in the port yet to
+parallelise.
+
+## 6. Tessellation reuse — unmeasured
+
+The Java renderer rebuilds every wedge's quads per frame from world-space math. Wedges of one
+arch share every parameter except `theta_start`, so the subdivision angles, face layout and UV
+phases can be computed once per arch and reused, leaving a cheap per-wedge transform; collision
+triangles can share one BVH per arch instead of one per wedge. The port now produces those quads
+(`core/wedge.rs`), so this is the next measurable item once rendering is wired.
+
+## What must not change
+
+These define what an existing build looks like, or prevent a visible defect. They are the boundary
+of "without breaking functionality":
 
 | Constant / rule | Why it must stay |
 |---|---|
-| `R = H/2 + S²/(8H)`, semicircle clamp on `H` | Defines every existing arch's radius and curvature. |
-| `MIN_RISE = 0.5`, ribbon cap `min(rise, depth/2 + 1.5)` | Decides when a click arches at all, and how far a thin ribbon bulges. |
-| `MIN_CURVATURE = 0.6` on `b²/a` | Guards the ellipse's inner edge from pinching into a cusp. |
-| The 0.5 mm inward nudge on the shared end face | Fixes z-fighting between adjacent voussoirs. Removing it reintroduces visible seams. |
-| `count = max(round(span)+1, round(arcLength))` for arches | Changing it changes how many wedges exist, i.e. the visible band. |
-| `/replace <from> <to>` matches the block, not the full state | Documented Java semantics; matching state would change results for stairs/slabs. |
-| `/outline` = the whole shell | The shipped behaviour, despite the README saying "12 edges". |
+| `R = H/2 + S²/(8H)`, semicircle clamp on the rise | Defines every existing arch's radius. |
+| `MIN_RISE = 0.5`, ribbon cap `min(rise, depth/2 + 1.5)` | Decides when a click arches at all. |
+| `MIN_CURVATURE = 0.6` on `b²/a` | Keeps the ellipse's inner edge from pinching into a cusp. |
+| `count = max(round(span)+1, round(arcLength))` | Changes how many wedges exist. |
+| The 8,192-sample perimeter and the 16-step Bézier polyline | Both feed `count` and the boundary angles, i.e. the block set. |
+| The 0.5 mm end-face nudge (sign differs: `+tangent` on the arch, `−tangent` on the other two) | Prevents z-fighting seams between adjacent voussoirs. |
+| `/replace <from>` matches the block, not the state | Documented Java semantics. |
+| `/outline` = the whole shell | Shipped behaviour, despite the README's "12 edges". |
+| `cell_extent`'s 8-corner sampling | It is the exact support function of a box, not a heuristic — there is nothing to improve. |
 
-## Recommended order
+## What I could not verify
 
-1. **Changes → `BlockEdit` run packer** (finding 4). Biggest win, no behaviour change, pure function.
-2. **Undo as deltas per operation** (finding 3). A 32,768-block op costs 31.2 MiB today; one player
-   holding 50 of them is a real server-memory problem, and the fix is local to `history.rs`.
-3. **`u16` block ids** (finding 3, same change). Halves every palette, clipboard and undo buffer.
-4. **Composite Gauss + Newton for the ellipse** (finding 2). Already implemented and tested in
-   `core::fast`; swap `build_ellipse` to it once the shape tests (perimeter, closure, uniform
-   widths) are re-run against it — the counts come out identical, so geometry does not move.
-5. **Dense block buffer in the Horizon glue** (finding 1). The core is agnostic; this is about the
-   `World` implementation the mod hands to `ops::*`.
-6. **Tessellation cache** (not measured): the Java renderer rebuilds every wedge's 70-odd quads per
-   frame, per wedge, from world-space math. Wedges of one arch share their parameters except
-   `theta_start`, so the tessellation (subdivision angles, face layout, UV phases) can be computed
-   once per arch and reused, leaving only a cheap per-wedge transform. Same for collision
-   triangles: one BVH per arch instead of per wedge.
-7. **Parallel planning** (not measured, safe by construction): planning a change batch reads the
-   world and writes only its own output, and boxes decompose into disjoint columns, so the planning
-   step can fan out over columns before a single serial `edit_blocks` call applies the result.
-   Horizon native mods run unsandboxed, so std threads are available; a wasm build could not do
-   this, which is a reason to ship native.
+The in-game half is still unwired (hooks, `edit_blocks` application, rendering, entity tool,
+brushes, settings screen), so:
 
-## What this analysis does **not** cover
+* the per-block write cost that decides whether finding 1 is a wall-clock win is unmeasured;
+* the cell-level block-set equivalence for finding 4 cannot be tested until the region builder
+  exists;
+* findings 5 and 6 are design arguments, not measurements.
 
-The in-game half of the port is still missing — hooks, the `BlockEdit` application itself, rotated
-and off-grid block rendering, the entity tool, brushes, and the creative settings screen. Nothing in
-this document assumes those exist; findings 1, 4, 6 and 7 are about the code that *does* exist plus
-the API contract read from the SDK. So: the port is not finished, and the analysis above is about
-the finished part.
-
-One consequence worth stating plainly: **finding 4 is only available because the target is
-Horizon.** On Java Edition the same batching is not exposed to mods, which is why the Java mod is
-per-block in the first place. That is the clearest case where the Rust architecture can be better
-than the one it mirrors, rather than merely faster.
+So the analysis covers the finished part of the port. The port is not complete, and no number above
+depends on the parts that are missing.
