@@ -1,0 +1,9 @@
+id = "buildertools"
+name = "Builder Tools"
+version = "0.3.0"
+api = "0.2"
+capabilities = ["registries"]
+
+[native]
+game = "26.3"
+horizon = "2b77287de099c9316278ba7ac4d83590fdb7ef30"

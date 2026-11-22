@@ -33,3 +33,6 @@ icon.png
 # Minecraft run logs
 logs/
 run-client.log
+
+# Horizon mod SDK fetched per build (regenerate with cargo horizon-mod)
+.horizon/
