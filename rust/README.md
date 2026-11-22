@@ -11,7 +11,7 @@ release asset and unpack it so that `.horizon/sdk/api/crates/horizon-mod-api` ex
 
 ## What is done
 
-The loader-independent half of the mod is ported and covered by unit tests (`cargo test`, 195 tests):
+The loader-independent half of the mod is ported and covered by unit tests (`cargo test`, 248 tests):
 
 | Rust | Ported from | State |
 |---|---|---|
@@ -35,6 +35,13 @@ The loader-independent half of the mod is ported and covered by unit tests (`car
 | `src/core/sessions.rs` — per-player state: each UUID's own survey, housing tool, settings and golems, plus the shared claim store, its build-rights check and the owner-only release | `SelectionStore`/`UndoStore` per player, `ClaimManager` | done |
 | `src/core/offgrid.rs` — offset rotatable blocks: yaw/pitch/offset transform with its inverse, snapping, the oriented box a turned block occupies, ray-vs-box, the voxel walk and the nearest-hit raycast | `OffGridTransform.java`, `RotatedBlockTriangles.java`, `collision/RotatedCollisionProvider.java`, `util/FreeBlockRaycast.java` | geometry done; collision and rendering limited by API 0.2 (below) |
 | `src/core/mesher.rs` — smooth meshed terrain: surface nets over a 16³ density field (one vertex per straddling cell, one quad per sign-changing lattice edge) plus the smoothing tool that averages a column's surface height and fills or cuts the difference | bundled `io.github.favasur.smoothterrain` (geometry half), `item/SmoothToolItem.java` | done |
+| `src/core/logs.rs` — rounded logs: a cylindrical trunk whose lower rim is dropped onto the *meshed* terrain sample by sample (so a tree on a slope follows the hill), the cell body that starts at the ground per column, a skirt so no gap shows, and `mesh_height`/`HeightIndex` for sampling the smooth surface | no Java source: new, built on `mesher` | done |
+| `src/core/brush.rs` — the brush tools: a radius-4 sphere of paint, a scatter over air that sits on solid ground, and the smoothing brush that levels a disc to its mean height using each column's own surface block | `BuilderServerHandler.paint`, `scatter`, `smooth`, `spherePositions` | done |
+| `src/core/handles.rs` — selection face-handle dragging: a drag plane fixed at grab time, the face snapped to the block grid, click-without-drag nudge, and the stretch flag | `client/HandleDragState.java` | done |
+| `src/core/entities.rs` — the Entity Tool's free-move drag (plane hit, grid snap, surface lock, dead zone) and its rotate mode (wrapped yaw accumulation, head mode) | `EntityDragState.java`, `EntityRotateState.java` | done |
+| `src/core/ruler.rs` — the Ruler's span/diagonal/volume/midpoint reading and the Laser's change-only target tracking | `selection/RulerState.java`, `selection/LaserState.java` | done |
+| `src/core/terrain.rs` — smooth terrain planning: which blocks are ground, a 16³ section as a blurred density field (rounded sides), its surface and its water surface as section quads with world-tiled UVs, light and sprites; `TerrainMode` toggle | `SmoothTerrainWorldRules.smoothness()`, bundled smooth terrain (policy half) | done |
+| `src/terrain.rs` — smooth terrain in game: the `add_section_geometry` renderer, the `block_render_visibility` block part for ground, and the live switch through `refresh_render_visibility` | `SmoothTerrainTogglePacket`, bundled mod's render hooks | done, not yet seen in game |
 | `src/hooks.rs` — the game-facing glue: a surveyor-stake right-click plants a housing stake in that player's session, the local player's yellow preview is submitted as world geometry every frame, and `GolemFetching` is read back from its change event | `ClientEvents`, `ServerEvents` (the parts above) | done, not yet seen in game |
 | `data/`, `assets/` — package content: `buildertools:surveyor_stake`, a sign-templated block (player-facing `rotation`/`facing`, thin plate collision) with a post-only model and its default block item | API 0.2 content files, see [CONTENT.md](CONTENT.md) | done |
 | `src/core/arch.rs` — voussoir arch radius, arc split, fan fallback, face frame, wedge corners, `RegionArch::Bezier` | `util/ArchGeometry.java`, `util/FaceFrame.java` | done |
@@ -45,7 +52,7 @@ The loader-independent half of the mod is ported and covered by unit tests (`car
 | `src/lib.rs` — the `Hooks` root | `BuilderToolsMod` | scaffold only |
 
 The region ops, all three curved shapes, the off-grid boxes and the mesher are covered by tests:
-`cargo test` runs all 195 of them, including the shape identities (voussoir tiling, ellipse closure, 1 m thickness), the
+`cargo test` runs all 248 of them, including the shape identities (voussoir tiling, ellipse closure, 1 m thickness), the
 tessellation invariants (34 quads and 68 triangles per voussoir, tile-split UV phases, face normals
 on the expected axis) and the numerical checks in `core::fast`.
 
@@ -72,12 +79,12 @@ in `hooks.rs`. What is still missing, or limited by API 0.2:
   and held claims on their UUID, and `hooks.rs` plants into it from the click's `player`. Claims are
   owned by the stable key `player:<uuid-hex>` rather than the display name, so a rename cannot lose
   one; `claim_area` and `release_claim` enforce ownership.
-* **Rotated / off-grid blocks** — the geometry is ported and tested in `core::offgrid` (transform,
-  inverse, snapping, oriented box, ray test, voxel walk, nearest-hit raycast), but the game side is
-  limited by the build: a content block's `shapes` are axis-aligned boxes only and there is no
-  block-collision hook, so a turned block's *collision* cannot match its model. Rendering is
-  possible (`block_entity_submit` with `native_draw_cube`, or `draw_model_instances` with the 3×4
-  matrix `OffGridTransform::matrix` already returns) and is not wired yet.
+* **Rotated / off-grid blocks** — geometry, picking and collision boxes are ported in `core::offgrid`,
+  with a packed `f32` picking path (`PackedTransform`, ray turned into the block's space once) that
+  measures 2.8× faster than the exact path. What the build cannot give is a *collision shape* that
+  follows a turned model: a content block's `shapes` are axis-aligned boxes and there is no
+  block-collision hook. Drawing a turned block is possible (`block_entity_submit` with
+  `native_draw_cube`, or `draw_model_instances` with `OffGridTransform::matrix`) and is not wired.
 * **Entity tool** — `EntityToolScreen`, `EntityDragState`, `EntityRotateState`, and the server-side
   `moveEntity`/`duplicateEntity`/`freezeEntity`.
 * **Golem entities** — `core::golem` decides everything (who is a minion, what it does each tick,
@@ -92,15 +99,62 @@ in `hooks.rs`. What is still missing, or limited by API 0.2:
 * **The settings panel's other halves** — the panel itself is built (below), but Java's screen also
   sends `WorldSettingsPacket` and `PlayerAbilitiesPacket` and saves the settings to a config file;
   the port keeps the values in memory and has no packet layer yet.
-* **Smooth terrain in the world** — `core::mesher` has the geometry (surface nets over a density
-  field, plus the smoothing tool's height averaging as an undoable edit), but API 0.2 has no custom
-  terrain mesher and no mesh collision shape, so the game's terrain cannot be replaced by a mesh.
-  `add_section_geometry` can draw arbitrary quads into a section, which is a display-only route the
-  port has not taken. Sounds and the mod's network packets are not ported at all.
+* **Mesh collision** — the terrain *is* meshed and drawn in game (see below), but collision stays the
+  blocks': this API reads a state's collision shape and never lets a mod answer it, so the player
+  walks on the block surface under the mesh. Smoothing moves the visible slope, not the floor.
+  Sounds and the mod's network packets are not ported at all.
 * **Packing the wedge surface into draw calls** (`wedgeQuads`). `wedge.rs` produces the tessellated
   quads with their tile-split UVs and the collision triangles; turning a `TileQuad` plus a
   `FaceKind` into a vertex buffer needs Horizon's block-sprite access, which the port has not wired
   yet. The geometry and UV logic itself is ported and tested.
+
+### Smooth terrain, live from the Creative panel
+
+The world's ground can be drawn as a smooth mesh instead of blocks, and the *Smooth terrain* row at
+the top of the Creative panel switches it while playing. Three API 0.2 features carry it:
+
+* **`add_section_geometry`** registers one renderer for the game. The mesher asks it for every
+  section it builds, on its workers, so the quads belong to that section's mesh: they are rebuilt
+  with it, never duplicated, and dropped when it unloads.
+* **`block_render_visibility`** is answered by a block part attached to every replaced state
+  (`TerrainPart`, attached per id in `register` — ground *and* water). While the mode is smooth those
+  states are hidden from the mesher; light, collision and the server are untouched.
+* **`refresh_render_visibility`** remeshes the loaded sections when the answer changes — that is the
+  switch, and it is called from the level tick only when the panel's value actually changed.
+
+**Rounded sides.** The surface is an isosurface through a density field that is blurred horizontally
+(two passes of a 3×3 box in x and z), so a one- or two-block step is drawn as a ramp about two blocks
+wide instead of a wall. The blur is *maximum-preserving*: it may only fill a step, never eat into
+solid ground, so a sill or a spire keeps its height and no column loses a block to the smoothing.
+Vertically the field is exactly the blocks', which is why a flat surface stays halfway through its
+top block.
+
+**Water that meets the shore.** Water is hidden like the ground and meshed as a second, translucent
+surface from its own field on the same padded lattice. Both surfaces are generated from the same
+corner lattice, and a water corner that has no water of its own climbs to the *ground's* height
+there, so the water's edge and the terrain's edge coincide: the shoreline is sealed, and water wraps
+around a rock that breaks the surface instead of stopping a block short of it. Buried water (inside a
+hill) is not drawn.
+
+**Seams.** A section is sampled two blocks out on every side, and every lattice point inside it is
+computed from the same blurred neighbourhood as its neighbour's — so two sections agree on the plane
+they share. Quads on the section's far lattice line are clamped onto the boundary rather than
+dropped, which is what keeps a 16-block border from showing a crack; a quad lying in the section's
+ceiling plane is left to the section above.
+
+Only natural ground is meshed (`TERRAIN_BLOCKS`: stone family, dirt family, sand, gravel, clay, snow,
+sandstone, bedrock) plus water. A build stays exactly as built: hiding is per state, and a house's
+planks are not in that set. Sampling a section is 9,261 block reads; planning it — sample, blur,
+isosurface and water — measures **0.90 ms** per 16³ section in the bench, on a meshing worker thread.
+
+**Collision is still the blocks'.** This API exposes a state's collision shape read-only
+(`level_block_shape`, `block_collision`) and has no collision-shape hook, so a mesh cannot be the
+player's floor; the two hooks that touch movement (`player_move`, `entity_move`) can veto or rewrite a
+delta on the *server* only, which the client does not predict and would rubber-band. What the port can
+do, it does: because the surface is only ever raised, never lowered, no mesh stands below a block top
+where the player would float, and no invisible mesh collar blocks a step — everything the player
+collides with is a real block. Walking up a smoothed slope still steps a whole block at a time, and
+the visual surface above the feet is where that shows.
 
 ## Tools beyond the Java mod
 

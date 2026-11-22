@@ -178,10 +178,12 @@ impl OrientedBox {
     /// The box a block shape takes at `transform`, centred on the cell at `cell` (whose corner is
     /// at `cell` in block coordinates).
     pub fn at(cell: BlockPos, shape: UnitBox, transform: &OffGridTransform) -> Self {
+        // The rotation's trig runs once; its three columns are the box's turned axes.
+        let r = transform.rotation();
         let rotated_axes = [
-            rotate_axis(transform, [1.0, 0.0, 0.0]),
-            rotate_axis(transform, [0.0, 1.0, 0.0]),
-            rotate_axis(transform, [0.0, 0.0, 1.0]),
+            [r[0][0], r[1][0], r[2][0]],
+            [r[0][1], r[1][1], r[2][1]],
+            [r[0][2], r[1][2], r[2][2]],
         ];
         let local_center = shape.center();
         // The shape's centre relative to the cell's centre, turned, then placed on the cell.
@@ -312,16 +314,6 @@ impl OrientedBox {
     }
 }
 
-/// Rotating a vector by the transform's rotation only.
-fn rotate_axis(transform: &OffGridTransform, axis: [f64; 3]) -> [f64; 3] {
-    let m = transform.matrix();
-    [
-        m[0] * axis[0] + m[1] * axis[1] + m[2] * axis[2],
-        m[4] * axis[0] + m[5] * axis[1] + m[6] * axis[2],
-        m[8] * axis[0] + m[9] * axis[1] + m[10] * axis[2],
-    ]
-}
-
 /// A tiny helper so the rotation reads as a rotation.
 struct AnyVec([f64; 3]);
 
@@ -422,6 +414,229 @@ where
             best = Some((cell, t));
         }
     }
+    best
+}
+
+/// Walks the cells a ray crosses, calling `visit` with each and stopping when it returns `false`.
+///
+/// The allocation-free form of [`cells_on_ray`]: the hot path (picking, off-grid raycasts) calls this
+/// and never builds a vector. Rust's zero-cost closures make it as fast as the loop inline, while
+/// the `Vec` version stays for the tests and the debug overlay.
+pub fn for_each_cell_on_ray(
+    origin: [f64; 3],
+    direction: [f64; 3],
+    max_distance: f64,
+    mut visit: impl FnMut(BlockPos) -> bool,
+) {
+    let length = (direction[0] * direction[0]
+        + direction[1] * direction[1]
+        + direction[2] * direction[2])
+        .sqrt();
+    if length < 1.0e-9 || !max_distance.is_finite() || max_distance <= 0.0 {
+        return;
+    }
+    let d = [
+        direction[0] / length,
+        direction[1] / length,
+        direction[2] / length,
+    ];
+    let mut cell = [
+        origin[0].floor() as i32,
+        origin[1].floor() as i32,
+        origin[2].floor() as i32,
+    ];
+    let step = [
+        if d[0] > 0.0 { 1 } else { -1 },
+        if d[1] > 0.0 { 1 } else { -1 },
+        if d[2] > 0.0 { 1 } else { -1 },
+    ];
+    let mut t_delta = [f64::INFINITY; 3];
+    let mut t_max = [f64::INFINITY; 3];
+    for axis in 0..3 {
+        if d[axis].abs() > 1.0e-12 {
+            t_delta[axis] = (1.0 / d[axis]).abs();
+            let boundary = if step[axis] > 0 {
+                (cell[axis] + 1) as f64
+            } else {
+                cell[axis] as f64
+            };
+            t_max[axis] = (boundary - origin[axis]) / d[axis];
+        }
+    }
+
+    let mut visited = 0;
+    loop {
+        if !visit(BlockPos::new(cell[0], cell[1], cell[2])) {
+            return;
+        }
+        visited += 1;
+        if visited > 4_096 {
+            return;
+        }
+        let axis = if t_max[0] <= t_max[1] && t_max[0] <= t_max[2] {
+            0
+        } else if t_max[1] <= t_max[2] {
+            1
+        } else {
+            2
+        };
+        if t_max[axis] > max_distance || !t_max[axis].is_finite() {
+            return;
+        }
+        cell[axis] += step[axis];
+        t_max[axis] += t_delta[axis];
+    }
+}
+
+/// A transform in the form the per-frame path wants: `f32`, rotation precomputed, laid out as nine
+/// numbers and an offset so a batch of blocks is contiguous memory.
+///
+/// Rust's advantage here is not a trick but a consequence of the type system: the f64 form is exact
+/// and pleasant to author against, and this packed form is what the loop over thousands of blocks
+/// uses — half the memory traffic, no trigonometry at all, and the ray turned into the block's own
+/// space **once** instead of three dot products per axis. Both are the same math, checked against
+/// each other in the tests.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PackedTransform {
+    /// Row-major 3x3 rotation.
+    pub rotation: [f32; 9],
+    pub offset: [f32; 3],
+}
+
+impl PackedTransform {
+    pub fn from_transform(transform: &OffGridTransform) -> Self {
+        let r = transform.rotation();
+        Self {
+            rotation: [
+                r[0][0] as f32,
+                r[0][1] as f32,
+                r[0][2] as f32,
+                r[1][0] as f32,
+                r[1][1] as f32,
+                r[1][2] as f32,
+                r[2][0] as f32,
+                r[2][1] as f32,
+                r[2][2] as f32,
+            ],
+            offset: [
+                transform.offset[0] as f32,
+                transform.offset[1] as f32,
+                transform.offset[2] as f32,
+            ],
+        }
+    }
+
+    /// The grid placement, which is the identity.
+    pub const IDENTITY: Self = Self {
+        rotation: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+        offset: [0.0; 3],
+    };
+
+    #[inline]
+    pub fn apply(&self, point: [f32; 3]) -> [f32; 3] {
+        let r = &self.rotation;
+        [
+            r[0] * point[0] + r[1] * point[1] + r[2] * point[2] + self.offset[0],
+            r[3] * point[0] + r[4] * point[1] + r[5] * point[2] + self.offset[1],
+            r[6] * point[0] + r[7] * point[1] + r[8] * point[2] + self.offset[2],
+        ]
+    }
+
+    /// World point into the block's own space (the rotation's inverse is its transpose).
+    #[inline]
+    pub fn apply_inverse(&self, point: [f32; 3]) -> [f32; 3] {
+        let r = &self.rotation;
+        let d = [
+            point[0] - self.offset[0],
+            point[1] - self.offset[1],
+            point[2] - self.offset[2],
+        ];
+        [
+            r[0] * d[0] + r[3] * d[1] + r[6] * d[2],
+            r[1] * d[0] + r[4] * d[1] + r[7] * d[2],
+            r[2] * d[0] + r[5] * d[1] + r[8] * d[2],
+        ]
+    }
+
+    /// Whether a world point is inside a box of `half` extents centred on `center`.
+    #[inline]
+    pub fn contains(&self, center: [f32; 3], half: [f32; 3], point: [f32; 3]) -> bool {
+        let local = self.apply_inverse(point);
+        let center = self.apply_inverse(center);
+        (local[0] - center[0]).abs() <= half[0]
+            && (local[1] - center[1]).abs() <= half[1]
+            && (local[2] - center[2]).abs() <= half[2]
+    }
+
+    /// Where a ray enters a box of `half` extents at `center`, in the block's own space: the ray is
+    /// turned once, then an axis-aligned slab test runs, which is the whole reason for packing.
+    #[inline]
+    pub fn ray_hit(
+        &self,
+        center: [f32; 3],
+        half: [f32; 3],
+        origin: [f32; 3],
+        direction: [f32; 3],
+    ) -> Option<f32> {
+        let o = self.apply_inverse(origin);
+        let c = self.apply_inverse(center);
+        // A direction is turned by the transpose alone; translation does not apply to it.
+        let r = &self.rotation;
+        let d = [
+            r[0] * direction[0] + r[3] * direction[1] + r[6] * direction[2],
+            r[1] * direction[0] + r[4] * direction[1] + r[7] * direction[2],
+            r[2] * direction[0] + r[5] * direction[1] + r[8] * direction[2],
+        ];
+        let mut t_min = f32::NEG_INFINITY;
+        let mut t_max = f32::INFINITY;
+        for axis in 0..3 {
+            let relative = o[axis] - c[axis];
+            if d[axis].abs() < 1.0e-8 {
+                if relative.abs() > half[axis] {
+                    return None;
+                }
+                continue;
+            }
+            let t1 = (-half[axis] - relative) / d[axis];
+            let t2 = (half[axis] - relative) / d[axis];
+            let (t1, t2) = if t1 > t2 { (t2, t1) } else { (t1, t2) };
+            t_min = t_min.max(t1);
+            t_max = t_max.min(t2);
+            if t_min > t_max {
+                return None;
+            }
+        }
+        (t_max >= 0.0).then(|| t_min.max(0.0))
+    }
+}
+
+/// The first off-grid block a ray hits, using the packed transform and no per-cell allocation.
+///
+/// This is the picking path the client runs every frame on the block under the crosshair.
+pub fn raycast_packed<F>(
+    origin: [f64; 3],
+    direction: [f64; 3],
+    max_distance: f64,
+    mut lookup: F,
+) -> Option<(BlockPos, f32)>
+where
+    F: FnMut(BlockPos) -> Option<(PackedTransform, [f32; 3], [f32; 3])>,
+{
+    let origin32 = [origin[0] as f32, origin[1] as f32, origin[2] as f32];
+    let direction32 = [direction[0] as f32, direction[1] as f32, direction[2] as f32];
+    let mut best: Option<(BlockPos, f32)> = None;
+    for_each_cell_on_ray(origin, direction, max_distance, |cell| {
+        let Some((transform, center, half)) = lookup(cell) else {
+            return true;
+        };
+        if let Some(t) = transform.ray_hit(center, half, origin32, direction32)
+            && t <= max_distance as f32
+            && best.is_none_or(|(_, best_t)| t < best_t)
+        {
+            best = Some((cell, t));
+        }
+        true
+    });
     best
 }
 
@@ -574,6 +789,95 @@ mod tests {
             let steps = (a.x - b.x).abs() + (a.y - b.y).abs() + (a.z - b.z).abs();
             assert_eq!(steps, 1, "{a:?} to {b:?} skipped a cell");
         }
+    }
+
+    #[test]
+    fn the_packed_transform_matches_the_exact_one() {
+        let transform = OffGridTransform::new([0.2, 0.5, -0.1], 37.0, -14.0);
+        let packed = PackedTransform::from_transform(&transform);
+        for point in [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.3, -0.4, 0.9], [-2.0, 5.0, 0.25]] {
+            let exact = transform.apply([point[0], point[1], point[2]]);
+            let fast = packed.apply([point[0] as f32, point[1] as f32, point[2] as f32]);
+            for axis in 0..3 {
+                assert!(
+                    (exact[axis] - fast[axis] as f64).abs() < 1.0e-4,
+                    "forward {exact:?} vs {fast:?}"
+                );
+            }
+            // The packed inverse returns to the point it started from.
+            let back = packed.apply_inverse(fast);
+            for axis in 0..3 {
+                assert!(
+                    (back[axis] - point[axis] as f32).abs() < 1.0e-4,
+                    "inverse {back:?} vs {point:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_packed_ray_hit_agrees_with_the_oriented_box() {
+        let cell = BlockPos::new(0, 0, 0);
+        let transform = OffGridTransform::new([0.0, 0.0, 0.0], 45.0, 0.0);
+        let exact = OrientedBox::at(cell, UnitBox::FULL, &transform);
+        let packed = PackedTransform::from_transform(&transform);
+        let centre = [0.5f32, 0.5, 0.5];
+        let half = [0.5f32, 0.5, 0.5];
+
+        for origin in [[-2.0f32, 0.5, 0.5], [4.0, 0.5, 0.5], [0.5, 5.0, 0.5], [3.0, 3.0, 3.0]] {
+            let direction = [centre[0] - origin[0], centre[1] - origin[1], centre[2] - origin[2]];
+            let fast = packed.ray_hit(centre, half, origin, direction);
+            let slow = exact.ray_intersection(
+                [origin[0] as f64, origin[1] as f64, origin[2] as f64],
+                [direction[0] as f64, direction[1] as f64, direction[2] as f64],
+            );
+            match (fast, slow) {
+                (Some(fast), Some(slow)) => {
+                    assert!((fast as f64 - slow).abs() < 1.0e-4, "{fast} vs {slow}");
+                }
+                (None, None) => {}
+                (fast, slow) => panic!("disagree: {fast:?} vs {slow:?}"),
+            }
+        }
+
+        // A miss stays a miss.
+        assert!(packed
+            .ray_hit(centre, half, [5.0, 5.0, 5.0], [1.0, 0.0, 0.0])
+            .is_none());
+    }
+
+    #[test]
+    fn the_packed_raycast_finds_what_the_exact_one_does() {
+        let cell = BlockPos::new(1, 0, 0);
+        let transform = OffGridTransform::new([0.0, 0.0, 0.0], 30.0, 10.0);
+        let exact = raycast([0.5, 0.5, 0.5], [1.0, 0.0, 0.0], 6.0, |candidate| {
+            (candidate == cell).then_some((UnitBox::FULL, transform))
+        });
+        let packed_transform = PackedTransform::from_transform(&transform);
+        let fast = raycast_packed([0.5, 0.5, 0.5], [1.0, 0.0, 0.0], 6.0, |candidate| {
+            (candidate == cell).then_some((packed_transform, [1.5, 0.5, 0.5], [0.5, 0.5, 0.5]))
+        });
+        assert_eq!(exact.map(|(cell, _)| cell), fast.map(|(cell, _)| cell));
+        assert!(fast.is_some());
+    }
+
+    #[test]
+    fn the_callback_walk_visits_the_same_cells_in_the_same_order() {
+        let collected = cells_on_ray([0.5, 64.5, 0.5], [1.0, -0.05, 0.3], 16.0);
+        let mut walked = Vec::new();
+        for_each_cell_on_ray([0.5, 64.5, 0.5], [1.0, -0.05, 0.3], 16.0, |cell| {
+            walked.push(cell);
+            true
+        });
+        assert_eq!(collected, walked);
+
+        // Stopping early ends the walk.
+        let mut count = 0;
+        for_each_cell_on_ray([0.5, 0.5, 0.5], [1.0, 0.0, 0.0], 32.0, |_| {
+            count += 1;
+            false
+        });
+        assert_eq!(count, 1);
     }
 
     #[test]

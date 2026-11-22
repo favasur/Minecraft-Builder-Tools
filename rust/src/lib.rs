@@ -14,6 +14,7 @@
 mod commands;
 mod core;
 mod hooks;
+mod terrain;
 pub mod ui;
 
 
@@ -29,6 +30,14 @@ pub use core::arch::{
     fan_block_data, region_arch,
 };
 pub use core::bezier::{BezierArch, BezierBlockData, extend as extend_bezier};
+pub use core::brush::{
+    BRUSH_RADIUS, Column as BrushColumn, columns as brush_columns, paint as paint_brush,
+    scatter as scatter_brush, smooth as smooth_brush, sphere, sphere_into,
+};
+pub use core::logs::{
+    LogQuad, LogSpec, LogSurface, cells as log_cells, mesh_height, place as place_log,
+    surface as log_surface,
+};
 pub use core::claim::{
     Claim, ClaimError, ClaimId, ClaimRequest, ClaimStore, TerritoryKind, VerticalExtent,
     polygons_intersect,
@@ -47,6 +56,9 @@ pub use core::sessions::{PlayerId, PlayerSession, Sessions};
 pub use core::settings::{BuilderSettings, Setting, SettingError};
 pub use core::clipboard::Clipboard;
 pub use core::edit::{BlockEdit, BlockRun};
+pub use core::entities::{Drag, Rotate, ray_angle, ray_plane, snap as snap_to_grid};
+pub use core::handles::{Axis as DragAxis, HandleDrag, Region as DragRegion, WORLD_LIMIT as DRAG_WORLD_LIMIT};
+pub use core::ruler::{Laser, Measurement, Ruler};
 pub use core::ellipse::{
     EllipseBlockData, EllipseResult, MIN_CURVATURE, RegionEllipse, build_ellipse, region_ellipse,
 };
@@ -63,10 +75,12 @@ pub use core::polygon::{
     Border, Hatch, Polygon, Territory, paint as paint_territory,
 };
 pub use core::mesher::{
+    HeightIndex,
     DensityGrid, MeshQuad, SectionMesh, SmoothSpec, smooth as smooth_terrain, smooth_heights,
     surface_nets,
 };
 pub use core::offgrid::{
+    PackedTransform, for_each_cell_on_ray, raycast_packed,
     GRID_EPSILON, OffGridTransform, OrientedBox, UnitBox, cells_on_ray,
     raycast as raycast_off_grid,
 };
@@ -81,14 +95,23 @@ pub use core::wall::{
 };
 pub use core::wedge::{FaceKind, TileQuad, WedgeFace, outward_normal, wedge_triangles};
 pub use hooks::{fetching_enabled, plant_stake, reset, stakes_down};
+pub use terrain::{
+    SmoothTerrainRenderer, TerrainPart, hides as hides_state, mode as terrain_mode, replaced_states,
+    set_mode as set_terrain_mode,
+};
 pub use ui::{current_settings, edit_settings};
+pub use core::terrain::{
+    BlockSample, SECTION, TERRAIN_BLOCKS, TerrainMode, TerrainQuad, WATER_BLOCKS, is_terrain,
+    is_water, plan_section, sprite_for,
+};
 pub use core::world::{BlockId, World};
 
 use mod_api::{
-    ClientHost, Flow, GameRuleChangedEvent, Hooks, HostSide, Registrar, RegistrationContext,
-    RenderLevelStageEvent, ScreenCharTypedPreEvent, ScreenKeyPressedPreEvent,
-    ScreenMouseButtonPressedPreEvent, ScreenMouseButtonReleasedPreEvent, ScreenMouseDraggedPreEvent,
-    ScreenRenderPostEvent, ServerHost, UseItemOnBlockEvent,
+    AddSectionGeometryEvent, ClientHost, Flow, GameRuleChangedEvent, Hooks, HostSide,
+    LevelTickPostEvent, Registrar, RegistrationContext, RenderLevelStageEvent,
+    ScreenCharTypedPreEvent, ScreenKeyPressedPreEvent, ScreenMouseButtonPressedPreEvent,
+    ScreenMouseButtonReleasedPreEvent, ScreenMouseDraggedPreEvent, ScreenRenderPostEvent,
+    ServerHost, UseItemOnBlockEvent,
 };
 use std::sync::OnceLock;
 
@@ -116,6 +139,9 @@ impl Hooks for BuilderTools {
     fn register(&self, registrar: &mut dyn Registrar, _context: &RegistrationContext) {
         // `/gamerule GolemFetching` is written lower-case and namespaced in game, as every gamerule
         // is; the sidebar and the docs keep the readable name.
+        // The ground's visibility answer is a block part, attached to every ground block here.
+        terrain::register_parts(registrar);
+
         let _ = registrar.game_rule_category("golems");
         if let Ok(key) = registrar.game_rule_bool(GAMERULE, "buildertools:golems", true) {
             let _ = GOLEM_FETCHING.set(key);
@@ -182,5 +208,19 @@ impl Hooks for BuilderTools {
 
     fn game_rule_changed(&self, host: &mut dyn ServerHost, event: &mut GameRuleChangedEvent<'_>) {
         hooks::game_rule_changed(host, event);
+    }
+
+    fn level_tick_post(&self, host: HostSide, event: &mut LevelTickPostEvent) {
+        hooks::level_tick_post(host, event);
+    }
+
+    // Smooth terrain: the section renderer, the ground's visibility and the live switch.
+
+    fn add_section_geometry(
+        &self,
+        _context: &RegistrationContext,
+        event: &mut AddSectionGeometryEvent<'_>,
+    ) {
+        terrain::register_renderer(event.renderers);
     }
 }

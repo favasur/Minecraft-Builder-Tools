@@ -24,6 +24,7 @@ use super::world::BlockId;
 /// Which value a row of the panel edits.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Setting {
+    SmoothTerrain,
     WallHeight,
     WallThickness,
     WallBatter,
@@ -38,7 +39,8 @@ pub enum Setting {
 
 impl Setting {
     /// Every row, in the order the panel shows them.
-    pub const ALL: [Setting; 10] = [
+    pub const ALL: [Setting; 11] = [
+        Setting::SmoothTerrain,
         Setting::WallHeight,
         Setting::WallThickness,
         Setting::WallBatter,
@@ -54,6 +56,7 @@ impl Setting {
     /// The stable id a saved file or a debug line uses.
     pub const fn key(self) -> &'static str {
         match self {
+            Setting::SmoothTerrain => "smooth_terrain",
             Setting::WallHeight => "wall_height",
             Setting::WallThickness => "wall_thickness",
             Setting::WallBatter => "wall_batter",
@@ -74,6 +77,7 @@ impl Setting {
     /// What the panel writes beside the field.
     pub const fn label(self) -> &'static str {
         match self {
+            Setting::SmoothTerrain => "Smooth terrain",
             Setting::WallHeight => "Wall height",
             Setting::WallThickness => "Wall thickness",
             Setting::WallBatter => "Wall batter",
@@ -90,6 +94,7 @@ impl Setting {
     /// The accepted range of a number, which the field's suggestion shows.
     pub const fn range(self) -> Option<(f64, f64)> {
         match self {
+            Setting::SmoothTerrain => None,
             Setting::WallHeight => Some((1.0, 64.0)),
             Setting::WallThickness => Some((0.5, 8.0)),
             Setting::WallBatter => Some((0.0, 2.0)),
@@ -105,7 +110,7 @@ impl Setting {
 
     /// Whether the row is a toggle rather than a number.
     pub const fn is_toggle(self) -> bool {
-        matches!(self, Setting::GolemFetching)
+        matches!(self, Setting::GolemFetching | Setting::SmoothTerrain)
     }
 
     /// Whether the row cycles through named choices.
@@ -134,6 +139,8 @@ pub struct BuilderSettings {
     pub wall_thickness: f64,
     /// How much thinner each course is: the wedge.
     pub wall_batter: f64,
+    /// Whether the world's ground is drawn as a smooth mesh instead of blocks.
+    pub smooth_terrain: bool,
     /// `/gamerule GolemFetching` as the player sees it.
     pub golem_fetching: bool,
     /// Which golem a spawn makes.
@@ -153,6 +160,7 @@ impl BuilderSettings {
         wall_height: 4,
         wall_thickness: 1.0,
         wall_batter: 0.0,
+        smooth_terrain: false,
         golem_fetching: true,
         golem_kind: GolemKind::Iron,
         path_width: 5.0,
@@ -165,6 +173,7 @@ impl BuilderSettings {
     /// The current text of a row's field, or the word its button shows.
     pub fn value(&self, setting: Setting) -> String {
         match setting {
+            Setting::SmoothTerrain => on_off(self.smooth_terrain).to_string(),
             Setting::WallHeight => self.wall_height.to_string(),
             Setting::WallThickness => trim(self.wall_thickness),
             Setting::WallBatter => trim(self.wall_batter),
@@ -188,6 +197,11 @@ impl BuilderSettings {
             Setting::GolemFetching => {
                 let value = parse_bool(text).ok_or(SettingError::NotANumber)?;
                 self.golem_fetching = value;
+                Ok(())
+            }
+            Setting::SmoothTerrain => {
+                let value = parse_bool(text).ok_or(SettingError::NotANumber)?;
+                self.smooth_terrain = value;
                 Ok(())
             }
             Setting::GolemKind => {
@@ -222,7 +236,9 @@ impl BuilderSettings {
             Setting::BorderWidth => self.border_width = value,
             Setting::TerritoryDepth => self.territory_depth = value.round() as i32,
             Setting::Reach => self.reach = value,
-            Setting::GolemFetching | Setting::GolemKind => return Err(SettingError::WrongKind),
+            Setting::GolemFetching | Setting::GolemKind | Setting::SmoothTerrain => {
+                return Err(SettingError::WrongKind);
+            }
         }
         Ok(())
     }
@@ -232,6 +248,10 @@ impl BuilderSettings {
         match setting {
             Setting::GolemFetching => {
                 self.golem_fetching = !self.golem_fetching;
+                Ok(())
+            }
+            Setting::SmoothTerrain => {
+                self.smooth_terrain = !self.smooth_terrain;
                 Ok(())
             }
             Setting::GolemKind => {
@@ -263,6 +283,15 @@ impl BuilderSettings {
             thickness: self.wall_thickness,
             batter: self.wall_batter,
             cap: None,
+        }
+    }
+
+    /// The terrain mode this setting describes.
+    pub fn terrain_mode(&self) -> super::terrain::TerrainMode {
+        if self.smooth_terrain {
+            super::terrain::TerrainMode::Smooth
+        } else {
+            super::terrain::TerrainMode::Vanilla
         }
     }
 
@@ -314,7 +343,7 @@ const fn step_of(setting: Setting) -> f64 {
         Setting::BorderWidth => 0.5,
         Setting::TerritoryDepth => 1.0,
         Setting::Reach => 16.0,
-        Setting::GolemFetching | Setting::GolemKind => 0.0,
+        Setting::GolemFetching | Setting::GolemKind | Setting::SmoothTerrain => 0.0,
     }
 }
 
@@ -493,6 +522,31 @@ mod tests {
         assert_eq!(territory.depth, 4);
         assert_eq!(territory.border.unwrap().width, 2.5);
         assert_eq!(territory.fill, Some(STONE));
+    }
+
+    #[test]
+    fn smooth_terrain_is_a_toggle_row_that_follows_the_terrain_mode() {
+        let mut settings = BuilderSettings::DEFAULT;
+        assert!(!settings.smooth_terrain, "vanilla by default");
+        assert_eq!(settings.terrain_mode(), super::super::terrain::TerrainMode::Vanilla);
+        assert_eq!(settings.value(Setting::SmoothTerrain), "off");
+
+        settings.press(Setting::SmoothTerrain).unwrap();
+        assert!(settings.smooth_terrain);
+        assert_eq!(settings.value(Setting::SmoothTerrain), "on");
+        assert_eq!(settings.terrain_mode(), super::super::terrain::TerrainMode::Smooth);
+
+        // A typed value works too, and nonsense is refused without changing anything.
+        settings.set_text(Setting::SmoothTerrain, "off").unwrap();
+        assert!(!settings.smooth_terrain);
+        assert_eq!(
+            settings.set_text(Setting::SmoothTerrain, "maybe"),
+            Err(SettingError::NotANumber)
+        );
+        assert_eq!(
+            settings.set_number(Setting::SmoothTerrain, 1.0),
+            Err(SettingError::WrongKind)
+        );
     }
 
     #[test]

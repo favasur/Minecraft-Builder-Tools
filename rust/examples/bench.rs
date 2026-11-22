@@ -5,8 +5,10 @@
 //! benchmark harness. The numbers quoted in `OPTIMIZATIONS.md` come from this binary.
 
 use buildertools::{
-    BlockBox, BlockChange, BlockEdit, BlockId, BlockPos, History, MAX_OPS, World, build_ellipse, fill,
-    region_arch, walls,
+    BlockBox, BlockChange, BlockEdit, BlockId, BlockPos, DensityGrid, HeightIndex, History, LogSpec,
+    BlockSample, MAX_OPS, PackedTransform, TerrainMode, plan_section, raycast_packed,
+    OffGridTransform, UnitBox, World, build_ellipse, cells_on_ray, fill, log_cells, log_surface,
+    mesh_height, paint_brush, raycast_off_grid, region_arch, surface_nets, walls,
 };
 use std::collections::HashMap;
 use std::mem::size_of;
@@ -207,4 +209,147 @@ fn main() {
         let _ = region_arch(wall, BlockPos::new(4, 0, 5), buildertools::Face::Up);
     }
     println!("region_arch: {:?}/call", t.elapsed() / 100_000);
+
+    // 6. Smooth terrain: surface nets over one 16^3 section, and how big the mesh is.
+    let grid = DensityGrid::from_fn(16, |x, y, z| {
+        8.0 - y as f32 + (x as f32 * 0.35).sin() * 0.8 + (z as f32 * 0.2).cos() * 0.5
+    });
+    let mut quad_count = 0;
+    let t = Instant::now();
+    for _ in 0..500 {
+        quad_count = surface_nets(&grid).quads.len();
+    }
+    let meshing = t.elapsed() / 500;
+    println!(
+        "surface_nets 16^3: {meshing:?}/section, {quad_count} quads ({:.1} nanoseconds per quad)",
+        meshing.as_secs_f64() * 1.0e9 / quad_count.max(1) as f64
+    );
+    let mesh = surface_nets(&grid);
+
+    // 7. Rounded logs: a rim sampled against that mesh, per log and per placed cell.
+    let spec = LogSpec::DEFAULT;
+    let t = Instant::now();
+    let mut surface_quads = 0;
+    for _ in 0..20_000 {
+        surface_quads = log_surface(&spec, [8.5, 4.0, 8.5], 20.0, |x, z| {
+            mesh_height(&mesh, x, z, 4.0)
+        })
+        .quads
+        .len();
+    }
+    println!(
+        "log rim on a 16^3 mesh: {:?}/log, {surface_quads} quads",
+        t.elapsed() / 20_000
+    );
+
+    let t = Instant::now();
+    let mut cells = 0;
+    for _ in 0..20_000 {
+        cells = log_cells(&spec, [8.5, 4.0, 8.5], 20.0, |x, z| mesh_height(&mesh, x, z, 4.0)).len();
+    }
+    println!("log body: {:?}/log, {cells} cells", t.elapsed() / 20_000);
+
+    // 7b. The same rim through the coarse XZ index instead of a scan of every quad.
+    let index = HeightIndex::new(&mesh, 4.0);
+    let t = Instant::now();
+    for _ in 0..20_000 {
+        let _ = log_surface(&spec, [8.5, 4.0, 8.5], 20.0, |x, z| index.height(x, z, 4.0));
+    }
+    println!(
+        "log rim via height index: {:?}/log",
+        t.elapsed() / 20_000
+    );
+
+    let t = Instant::now();
+    for _ in 0..20_000 {
+        let _ = log_cells(&spec, [8.5, 4.0, 8.5], 20.0, |x, z| index.height(x, z, 4.0));
+    }
+    println!(
+        "log body via height index: {:?}/log",
+        t.elapsed() / 20_000
+    );
+
+    // 8. Brushes: a click's sphere of changes, on a dense world.
+    let brush_region = BlockBox::new(BlockPos::new(0, 0, 0), BlockPos::new(31, 31, 31));
+    let mut world = DenseWorld::new(brush_region);
+    let centre = BlockPos::new(16, 16, 16);
+    let t = Instant::now();
+    let mut painted = 0;
+    for click in 0..2_000 {
+        painted = paint_brush(
+            &mut world,
+            centre,
+            BlockId::new(if click % 2 == 0 { 1 } else { 2 }),
+        )
+        .len();
+    }
+    println!(
+        "paint brush: {:?}/click, {painted} blocks",
+        t.elapsed() / 2_000
+    );
+
+    // 9. Off-grid picking: the voxel walk and the raycast through a slab of turned blocks.
+    let t = Instant::now();
+    let mut hits = 0;
+    for _ in 0..20_000 {
+        hits += cells_on_ray([0.5, 64.5, 0.5], [1.0, -0.05, 0.3], 32.0).len();
+    }
+    println!("cells_on_ray over 32 blocks: {:?}/ray, {hits} cells", t.elapsed() / 20_000);
+
+    let turned = OffGridTransform::new([0.0, 0.1, 0.0], 30.0, 15.0);
+    let t = Instant::now();
+    let mut found = 0;
+    for _ in 0..5_000 {
+        if raycast_off_grid([0.5, 64.5, 0.5], [1.0, -0.05, 0.3], 32.0, |cell| {
+            (cell.y == 64).then_some((UnitBox::FULL, turned))
+        })
+        .is_some()
+        {
+            found += 1;
+        }
+    }
+    println!(
+        "off-grid raycast over a slab: {:?}/ray, {found} of 5,000 hit",
+        t.elapsed() / 5_000
+    );
+
+    // 10. The packed picking path: f32 transform, ray turned once, no per-cell allocation.
+    let packed = PackedTransform::from_transform(&turned);
+    let half = [0.5f32, 0.5, 0.5];
+    let t = Instant::now();
+    let mut packed_hits = 0;
+    for _ in 0..5_000 {
+        if raycast_packed([0.5, 64.5, 0.5], [1.0, -0.05, 0.3], 32.0, |cell| {
+            (cell.y == 64).then(|| {
+                (
+                    packed,
+                    [cell.x as f32 + 0.5, 64.5, cell.z as f32 + 0.5],
+                    half,
+                )
+            })
+        })
+        .is_some()
+        {
+            packed_hits += 1;
+        }
+    }
+    println!(
+        "packed off-grid picking: {:?}/ray, {packed_hits} of 5,000 hit",
+        t.elapsed() / 5_000
+    );
+
+    // 11. Terrain: planning one section's smooth mesh from a block sampler.
+    let t = Instant::now();
+    let mut quads = 0;
+    for _ in 0..200 {
+        let plan = plan_section(TerrainMode::Smooth, |x, y, z| {
+            let height = 8.0 + (x as f32 * 0.35).sin() * 1.5 + (z as f32 * 0.2).cos();
+            ((y as f32) < height).then_some(BlockSample::ground("minecraft:block/stone", [15, 15]))
+        });
+        quads = plan.map(|plan| plan.quads.len()).unwrap_or(0);
+    }
+    println!(
+        "terrain section plan 16^3: {:?}/section, {quads} quads",
+        t.elapsed() / 200
+    );
 }

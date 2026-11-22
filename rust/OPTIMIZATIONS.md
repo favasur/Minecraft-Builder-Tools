@@ -120,6 +120,35 @@ phases can be computed once per arch and reused, leaving a cheap per-wedge trans
 triangles can share one BVH per arch instead of one per wedge. The port now produces those quads
 (`core/wedge.rs`), so this is the next measurable item once rendering is wired.
 
+## 7. The newer hot paths — measured
+
+Same machine, `cargo run --release --example bench`, one 16³ section whose surface rolls by a block
+or so (`cargo test` covers the correctness; these are timings).
+
+| Path | Cost | Notes |
+|---|---|---|
+| `surface_nets`, 16³ section | **0.49 ms**, 258 quads | 1.9 µs per quad, including the vertex pass and the 12 edge tests per cell |
+| Log rim, 12 sides, 13 samples | 14.6 µs with `mesh_height` (scan) → **3.1 µs** with `HeightIndex` | 4.7× |
+| Log body, 12 cells | 17.7 µs (scan) → **2.6 µs** (`HeightIndex`) | 6.9× |
+| Paint brush, radius 4 | **3.0 µs** per click, 257 cells | walks the sphere in place; allocates only the change batch |
+| Voxel walk, 32 blocks | **0.78 µs** per ray, ~43 cells | Amanatides–Woo, no per-cell allocation |
+| Off-grid raycast over a slab (exact) | **1.9 µs** per ray | f64 oriented box per candidate cell, nearest hit kept |
+| Off-grid picking, packed | **0.67 µs** per ray | 2.8x faster: f32 transform, ray turned once, no per-cell vector |
+| Smooth terrain section, 16³ | **0.90 ms**, 331 quads | 9,261 block samples, two horizontal blur passes, the isosurface, and the water surface |
+
+Off-grid picking gained a second, packed path: `PackedTransform` keeps the rotation as nine `f32`s and
+turns the *ray* into the block's own space once, then runs an axis-aligned slab test — three dots per
+ray instead of nine per box, half the memory traffic, no trigonometry. `for_each_cell_on_ray` walks the
+cells through a closure, so the picking path allocates nothing; `cells_on_ray` remains for the debug
+overlay. The two paths agree in the tests (forward, inverse and ray distances within 1e-4).
+
+The one structural change this bought is `HeightIndex`: a section's quads filed under a coarse 4-block
+XZ grid, so a rim sample tests a handful of quads instead of every quad in the section. It returns the
+same heights as the linear scan (checked across 1,089 sample points in `mesher`'s tests), so it is a
+pure speed-up, not a change of result. The rest of the new code is already allocation-light: the
+mesher preallocates its quad vector, `sphere_into` reuses one buffer, and `OrientedBox::at` computes
+the rotation's trig once per box instead of once per axis.
+
 ## What must not change
 
 These define what an existing build looks like, or prevent a visible defect. They are the boundary
@@ -139,13 +168,14 @@ of "without breaking functionality":
 
 ## What I could not verify
 
-The in-game half is still unwired (hooks, `edit_blocks` application, rendering, entity tool,
-brushes, settings screen), so:
+The game still does not run here (no Horizon instance), and edits are not applied yet (`edit_blocks`
+needs the block-state table), so:
 
 * the per-block write cost that decides whether finding 1 is a wall-clock win is unmeasured;
 * the cell-level block-set equivalence for finding 4 cannot be tested until the region builder
   exists;
-* findings 5 and 6 are design arguments, not measurements.
+* findings 5 and 6 are design arguments, not measurements;
+* every number in section 7 is core-only: it measures the port, not a frame in game.
 
 So the analysis covers the finished part of the port. The port is not complete, and no number above
 depends on the parts that are missing.

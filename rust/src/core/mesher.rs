@@ -176,7 +176,7 @@ pub fn surface_nets(grid: &DensityGrid) -> SectionMesh {
         }
     }
 
-    let mut quads = Vec::new();
+    let mut quads = Vec::with_capacity((n * n) as usize);
     // A quad per sign-changing lattice edge, joining the four cells that share it.
     for y in 0..=n {
         for z in 0..=n {
@@ -430,6 +430,114 @@ pub fn smooth<W: World>(
     out
 }
 
+/// A coarse XZ grid over a section's quads, for looking up the surface height at a point without
+/// scanning the whole mesh.
+///
+/// A section's mesh is a few hundred quads; a trunk's rim samples a dozen points per log and a
+/// scatter brush samples hundreds per click, so the linear scan adds up. Each quad is filed under
+/// every cell of a coarse grid it overlaps, and a lookup then tests only that cell's few quads.
+#[derive(Clone, Debug, Default)]
+pub struct HeightIndex {
+    cell: f64,
+    min_x: f64,
+    min_z: f64,
+    cols: usize,
+    rows: usize,
+    buckets: Vec<Vec<u32>>,
+    quads: Vec<MeshQuad>,
+}
+
+impl HeightIndex {
+    /// Indexes `mesh` on cells `cell` blocks wide. A cell of 4 keeps a section's buckets small
+    /// without making the index itself large.
+    pub fn new(mesh: &SectionMesh, cell: f64) -> Self {
+        let cell = if cell > 1.0e-6 { cell } else { 4.0 };
+        let (mut min_x, mut min_z, mut max_x, mut max_z) = (
+            f64::INFINITY,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            f64::NEG_INFINITY,
+        );
+        for quad in &mesh.quads {
+            for corner in &quad.corners {
+                min_x = min_x.min(corner[0]);
+                min_z = min_z.min(corner[2]);
+                max_x = max_x.max(corner[0]);
+                max_z = max_z.max(corner[2]);
+            }
+        }
+        if !min_x.is_finite() || !min_z.is_finite() {
+            return Self::default();
+        }
+        let cols = (((max_x - min_x) / cell).ceil() as usize + 1).max(1);
+        let rows = (((max_z - min_z) / cell).ceil() as usize + 1).max(1);
+        let mut buckets = vec![Vec::new(); cols * rows];
+        for (index, quad) in mesh.quads.iter().enumerate() {
+            let (mut qx0, mut qx1, mut qz0, mut qz1) = (
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+                f64::INFINITY,
+                f64::NEG_INFINITY,
+            );
+            for corner in &quad.corners {
+                qx0 = qx0.min(corner[0]);
+                qx1 = qx1.max(corner[0]);
+                qz0 = qz0.min(corner[2]);
+                qz1 = qz1.max(corner[2]);
+            }
+            let x0 = (((qx0 - min_x) / cell).floor() as isize).clamp(0, cols as isize - 1) as usize;
+            let x1 = (((qx1 - min_x) / cell).floor() as isize).clamp(0, cols as isize - 1) as usize;
+            let z0 = (((qz0 - min_z) / cell).floor() as isize).clamp(0, rows as isize - 1) as usize;
+            let z1 = (((qz1 - min_z) / cell).floor() as isize).clamp(0, rows as isize - 1) as usize;
+            for row in z0..=z1 {
+                for col in x0..=x1 {
+                    buckets[row * cols + col].push(index as u32);
+                }
+            }
+            }
+        Self {
+            cell,
+            min_x,
+            min_z,
+            cols,
+            rows,
+            buckets,
+            quads: mesh.quads.clone(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.quads.is_empty()
+    }
+
+    /// The surface height at `(x, z)`: the highest upward-facing quad whose plane covers the point.
+    /// `fallback` where the point is outside the mesh.
+    pub fn height(&self, x: f64, z: f64, fallback: f64) -> f64 {
+        if self.quads.is_empty() {
+            return fallback;
+        }
+        let col = ((x - self.min_x) / self.cell).floor();
+        let row = ((z - self.min_z) / self.cell).floor();
+        if !(0.0..self.cols as f64).contains(&col) || !(0.0..self.rows as f64).contains(&row) {
+            return fallback;
+        }
+        let bucket = &self.buckets[row as usize * self.cols + col as usize];
+        let mut best: Option<f64> = None;
+        for index in bucket {
+            let quad = &self.quads[*index as usize];
+            if quad.normal[1].abs() < 0.2 {
+                continue;
+            }
+            if let Some(y) = super::logs::quad_height_at(quad, x, z)
+                && best.is_none_or(|current| y > current)
+            {
+                best = Some(y);
+            }
+        }
+        best.unwrap_or(fallback)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -460,6 +568,35 @@ mod tests {
         assert!(mesh.is_empty());
         assert!(mesh.vertices.is_empty());
         assert!(mesh.bounds().is_none());
+    }
+
+    #[test]
+    fn the_height_index_agrees_with_a_linear_scan() {
+        let grid = DensityGrid::from_fn(16, |x, y, z| {
+            8.0 - y as f32 + (x as f32 * 0.35).sin() * 0.8 + (z as f32 * 0.2).cos() * 0.5
+        });
+        let mesh = surface_nets(&grid);
+        assert!(!mesh.is_empty());
+        let index = HeightIndex::new(&mesh, 4.0);
+        assert!(!index.is_empty());
+
+        let mut sampled = 0;
+        for zi in 0..=32 {
+            for xi in 0..=32 {
+                let (x, z) = (xi as f64 * 0.5, zi as f64 * 0.5);
+                let linear = super::super::logs::mesh_height(&mesh, x, z, -1.0);
+                let indexed = index.height(x, z, -1.0);
+                assert!(
+                    (linear - indexed).abs() < 1.0e-9,
+                    "at ({x}, {z}): scan {linear}, index {indexed}"
+                );
+                sampled += 1;
+            }
+        }
+        assert!(sampled > 1_000);
+
+        // Outside the mesh both answer with the fallback.
+        assert_eq!(index.height(-40.0, -40.0, -1.0), -1.0);
     }
 
     #[test]

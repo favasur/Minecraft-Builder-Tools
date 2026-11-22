@@ -19,8 +19,8 @@ use std::sync::Mutex;
 
 use mod_api::{
     ClientHost, Flow, GameRuleChangedEvent, GameRuleValue, HostSide, Identifier, InteractionResult,
-    LogicalSide, RenderLevelStageEvent, ServerHost, UseItemOnBlockEvent, UsePhase, WorldDepth,
-    WorldLine, WorldQuad,
+    LevelTickPostEvent, LogicalSide, RenderLevelStageEvent, ServerHost, UseItemOnBlockEvent,
+    UsePhase, WorldDepth, WorldLine, WorldQuad,
 };
 
 use crate::core::preview::PreviewDepth;
@@ -163,6 +163,15 @@ pub fn render_level_stage(host: &dyn ClientHost, event: &mut RenderLevelStageEve
     if !lines.is_empty() {
         let _ = event.draw.lines(&lines);
     }
+}
+
+/// Each level tick: the client follows the Creative panel's terrain row, and a change remeshes the
+/// loaded sections through `refresh_render_visibility`.
+pub fn level_tick_post(host: HostSide, _event: &mut LevelTickPostEvent) {
+    let HostSide::Client(client) = host else {
+        return;
+    };
+    crate::terrain::sync(client, crate::current_settings());
 }
 
 /// Reads `GolemFetching` back whenever it changes, so the golems follow the rule the player set.
