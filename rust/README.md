@@ -147,6 +147,15 @@ sandstone, bedrock) plus water. A build stays exactly as built: hiding is per st
 planks are not in that set. Sampling a section is 9,261 block reads; planning it — sample, blur,
 isosurface and water — measures **0.90 ms** per 16³ section in the bench, on a meshing worker thread.
 
+**Why not the engine internals.** The pinned SDK at `.horizon/sdk` ships the mod surface only —
+`horizon-mod-api`, its macros, `horizon-mod-vocab`, `horizon-mod-runtime`, `horizon-mod-point-shape`
+and `horizon-core` (the game's shared types) — and nothing of `horizon-client-render` (the mesher,
+`SectionMesh`, `SectionGpu`) or `horizon-world` (entity physics). Neither `horizon-client-render` nor a
+`horizon-mixins` crate is on crates.io, so from this workspace there is no way to hook the renderer or
+the physics; that route needs a native mod built inside the engine's own workspace against the pinned
+commit. Everything this module does is therefore the supported API: `add_section_geometry` for the
+quads, `block_render_visibility` for hiding, `refresh_render_visibility` for the live switch.
+
 **Collision is still the blocks'.** This API exposes a state's collision shape read-only
 (`level_block_shape`, `block_collision`) and has no collision-shape hook, so a mesh cannot be the
 player's floor; the two hooks that touch movement (`player_move`, `entity_move`) can veto or rewrite a
