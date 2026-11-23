@@ -11,7 +11,7 @@ release asset and unpack it so that `.horizon/sdk/api/crates/horizon-mod-api` ex
 
 ## What is done
 
-The loader-independent half of the mod is ported and covered by unit tests (`cargo test`, 256 tests):
+The loader-independent half of the mod is ported and covered by unit tests (`cargo test`, 257 tests):
 
 | Rust | Ported from | State |
 |---|---|---|
@@ -44,7 +44,7 @@ The loader-independent half of the mod is ported and covered by unit tests (`car
 | `src/core/ruler.rs` — the Ruler's span/diagonal/volume/midpoint reading and the Laser's change-only target tracking | `selection/RulerState.java`, `selection/LaserState.java` | done |
 | `src/core/terrain.rs` — smooth terrain planning: which blocks are ground, a 16³ section as a blurred density field (rounded sides), its surface and its water surface as section quads with world-tiled UVs, light and sprites; `TerrainMode` toggle | `SmoothTerrainWorldRules.smoothness()`, bundled smooth terrain (policy half) | done |
 | `src/terrain.rs` — smooth terrain in game: the `add_section_geometry` renderer, the `block_render_visibility` block part for ground, and the live switch through `refresh_render_visibility` | `SmoothTerrainTogglePacket`, bundled mod's render hooks | done, not yet seen in game |
-| `src/hooks.rs` — the game-facing glue: a surveyor-stake right-click plants a housing stake in that player's session *and queues the stake block for the next tick*, the local player's yellow preview is submitted as world geometry every frame, `GolemFetching` is read back from its change event, and the server tick flushes queued writes and ticks the enlisted golems, writing each `Placed` action | `ClientEvents`, `ServerEvents` (the parts above) | done, not yet seen in game |
+| `src/hooks.rs` — the game-facing glue: a surveyor-stake right-click plants a housing stake in that player's session on the face that was clicked, *and queues the stake block for the next tick*, the local player's yellow preview is submitted as world geometry once per frame, at `AfterLevel` only, `GolemFetching` is read back from its change event, and the server tick flushes queued writes and ticks the enlisted golems, writing each `Placed` action | `ClientEvents`, `ServerEvents` (the parts above) | done, not yet seen in game |
 | `data/`, `assets/` — package content: `buildertools:surveyor_stake`, a sign-templated block (player-facing `rotation`/`facing`, thin plate collision) with a post-only model and its default block item | API 0.2 content files, see [CONTENT.md](CONTENT.md) | done |
 | `src/core/arch.rs` — voussoir arch radius, arc split, fan fallback, face frame, wedge corners, `RegionArch::Bezier` | `util/ArchGeometry.java`, `util/FaceFrame.java` | done |
 | `src/core/bezier.rs` — quadratic Bézier band, arc-length split, extension, surface | `util/BezierGeometry.java` | done |
@@ -54,7 +54,7 @@ The loader-independent half of the mod is ported and covered by unit tests (`car
 | `src/lib.rs` — the `Hooks` root | `BuilderToolsMod` | scaffold only |
 
 The region ops, all three curved shapes, the off-grid boxes and the mesher are covered by tests:
-`cargo test` runs all 256 of them, including the shape identities (voussoir tiling, ellipse closure, 1 m thickness), the
+`cargo test` runs all 257 of them, including the shape identities (voussoir tiling, ellipse closure, 1 m thickness), the
 tessellation invariants (34 quads and 68 triangles per voussoir, tile-split UV phases, face normals
 on the expected axis) and the numerical checks in `core::fast`.
 

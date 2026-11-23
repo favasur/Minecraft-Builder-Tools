@@ -207,10 +207,11 @@ fn depth(depth: PreviewDepth) -> WorldDepth {
     }
 }
 
-/// A right-click with the surveyor stake plants it where the player clicked.
+/// A right-click with the surveyor stake plants it on the face the player clicked.
 ///
-/// The stake stands on top of the clicked block, which is where the Java item puts it. Only the
-/// server side writes, so a single-player click plants once even though both sides see the event.
+/// The stake stands beside the clicked block on the face that was hit, which is where the Java item
+/// puts it. Only the server side writes, so a single-player click plants once even though both sides
+/// see the event.
 pub fn use_item_on_block(host: HostSide, event: &mut UseItemOnBlockEvent<'_>) -> Flow {
     if event.phase != UsePhase::ItemBeforeBlock || event.click.side != LogicalSide::Server {
         return Flow::Continue;
@@ -232,8 +233,9 @@ pub fn use_item_on_block(host: HostSide, event: &mut UseItemOnBlockEvent<'_>) ->
     }
 
     let clicked = event.click.pos;
-    // The stake stands on top of the block that was clicked.
-    if !plant_stake(event.click.player, [clicked[0], clicked[1] + 1, clicked[2]]) {
+    // The stake stands on the face that was clicked: above it for the top, beside it for a side.
+    let target = stake_position(clicked, event.click.hit.face);
+    if !plant_stake(event.click.player, target) {
         // A full survey is not an error: the click simply does nothing.
         return Flow::Continue;
     }
@@ -241,15 +243,34 @@ pub fn use_item_on_block(host: HostSide, event: &mut UseItemOnBlockEvent<'_>) ->
     // a wall takes. A spawn the player never sees would be a survey of nothing. The click carries no
     // level handle, so the write waits for the next level tick, which also batches a burst of clicks.
     queue_write(
-        BlockPos::new(clicked[0], clicked[1] + 1, clicked[2]),
+        BlockPos::new(target[0], target[1], target[2]),
         palette::SURVEYOR_STAKE,
     );
     *event.cancellation_result = InteractionResult::Success;
     Flow::Cancel
 }
 
-/// Submits the local player's stake preview as world geometry.
+/// Where a stake planted on `clicked`'s `face` stands: the block next to it, as the Java item does.
+///
+/// A click on the top face plants above, a click on a side plants beside it, and a click that started
+/// inside the block (`face` is `[0, 0, 0]`) plants in the block itself rather than a block up.
+pub fn stake_position(clicked: [i32; 3], face: [i32; 3]) -> [i32; 3] {
+    [
+        clicked[0] + face[0],
+        clicked[1] + face[1],
+        clicked[2] + face[2],
+    ]
+}
+
+/// Submits the local player's stake preview as world geometry, once per frame.
+///
+/// The hook is heard for every stage of the frame — sky, opaque, translucent, weather, then level —
+/// and geometry submitted at the earlier ones would be drawn under the terrain it belongs on top of,
+/// or twice. Only `AfterLevel` is the stage the API documents for custom world geometry.
 pub fn render_level_stage(host: &dyn ClientHost, event: &mut RenderLevelStageEvent<'_>) {
+    if event.stage != mod_api::RenderLevelStage::AfterLevel {
+        return;
+    }
     let Some(player) = host.local_player().map(|player| player.uuid()) else {
         return;
     };
@@ -368,6 +389,18 @@ mod tests {
         forget_golems();
         assert_eq!(golem_count(), 0);
         reset();
+    }
+
+    #[test]
+    fn a_stake_stands_on_the_face_that_was_clicked() {
+        // Top, bottom and the four sides, then a click that started inside the block.
+        assert_eq!(stake_position([3, 64, 5], [0, 1, 0]), [3, 65, 5]);
+        assert_eq!(stake_position([3, 64, 5], [0, -1, 0]), [3, 63, 5]);
+        assert_eq!(stake_position([3, 64, 5], [1, 0, 0]), [4, 64, 5]);
+        assert_eq!(stake_position([3, 64, 5], [-1, 0, 0]), [2, 64, 5]);
+        assert_eq!(stake_position([3, 64, 5], [0, 0, 1]), [3, 64, 6]);
+        assert_eq!(stake_position([3, 64, 5], [0, 0, -1]), [3, 64, 4]);
+        assert_eq!(stake_position([3, 64, 5], [0, 0, 0]), [3, 64, 5]);
     }
 
     #[test]
