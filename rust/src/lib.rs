@@ -14,6 +14,7 @@
 mod commands;
 mod core;
 mod hooks;
+pub mod rig;
 mod terrain;
 pub mod ui;
 
@@ -51,6 +52,7 @@ pub use core::map::{
     overlay as claim_overlay, style_for as claim_style,
 };
 pub use core::panel::{Panel, PanelRow, RowKind};
+pub use core::palette;
 pub use core::plan::{BuildPlan, PlanStep};
 pub use core::sessions::{PlayerId, PlayerSession, Sessions};
 pub use core::settings::{BuilderSettings, Setting, SettingError};
@@ -94,7 +96,10 @@ pub use core::wall::{
     Housing, MIN_COURSE, WallSpec, build as build_wall, preview as wall_preview,
 };
 pub use core::wedge::{FaceKind, TileQuad, WedgeFace, outward_normal, wedge_triangles};
-pub use hooks::{fetching_enabled, plant_stake, reset, stakes_down};
+pub use hooks::{
+    enlist, fetching_enabled, forget_golems, golem_count, pending_count, plant_stake, queue_write,
+    reset, stakes_down, tick_golems,
+};
 pub use terrain::{
     SmoothTerrainRenderer, TerrainPart, hides as hides_state, mode as terrain_mode, replaced_states,
     set_mode as set_terrain_mode,
@@ -141,6 +146,9 @@ impl Hooks for BuilderTools {
         // is; the sidebar and the docs keep the readable name.
         // The ground's visibility answer is a block part, attached to every ground block here.
         terrain::register_parts(registrar);
+        // The block table: the core's ids become the host's keys once, here, so every later write is
+        // a lookup instead of a name lookup.
+        rig::register_palette(registrar);
 
         let _ = registrar.game_rule_category("golems");
         if let Ok(key) = registrar.game_rule_bool(GAMERULE, "buildertools:golems", true) {

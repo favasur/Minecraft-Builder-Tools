@@ -20,6 +20,7 @@ pub mod map;
 pub mod mesher;
 pub mod offgrid;
 pub mod ops;
+pub mod palette;
 pub mod panel;
 pub mod path;
 pub mod plan;

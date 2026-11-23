@@ -11,7 +11,7 @@ release asset and unpack it so that `.horizon/sdk/api/crates/horizon-mod-api` ex
 
 ## What is done
 
-The loader-independent half of the mod is ported and covered by unit tests (`cargo test`, 248 tests):
+The loader-independent half of the mod is ported and covered by unit tests (`cargo test`, 256 tests):
 
 | Rust | Ported from | State |
 |---|---|---|
@@ -20,6 +20,8 @@ The loader-independent half of the mod is ported and covered by unit tests (`car
 | `src/core/history.rs` — 50-operation undo/redo, stored packed (15.6 MiB per player at the limits) | `server/UndoStore.java` | done |
 | `src/core/clipboard.rs` — copy/paste | `server/ClipboardStore.java`, `copySelection`/`paste` | done |
 | `src/core/edit.rs` — a change batch packed into palette + column runs for one bulk edit | `ServerHost::edit_blocks` (Horizon's batch route) | done |
+| `src/core/palette.rs` — the named block catalog: the ids the core stores, with the names they mean and stable numbers across sessions | Java's block registry lookups, by name | done |
+| `src/rig.rs` — the block table and the writes: core id → host `BlockKey` at registration → `BlockState` at write, the host `BlockEdit` translation, `edit_blocks`, and the read-back the golem's plan sees the world through | `Registrar::block_key`, `block_state_default`, `edit_blocks`, `LevelRef::block_state` | done, not yet seen in game |
 | `src/core/path.rs` — linear objects: a Catmull–Rom path swept with a width, thickness and per-band block slots (road, path, fence) | no Java source; modelled on map-editor linear objects | done |
 | `src/core/polygon.rs` — territorial objects: arbitrary polygon with border band, fill and diagonal hatching, stacked to a depth | no Java source; modelled on map-editor area objects | done |
 | `src/core/preview.rs` — polygonal territory previews: a semi-transparent yellow area with a bright yellow outline, merged per row | no Java source | done |
@@ -42,7 +44,7 @@ The loader-independent half of the mod is ported and covered by unit tests (`car
 | `src/core/ruler.rs` — the Ruler's span/diagonal/volume/midpoint reading and the Laser's change-only target tracking | `selection/RulerState.java`, `selection/LaserState.java` | done |
 | `src/core/terrain.rs` — smooth terrain planning: which blocks are ground, a 16³ section as a blurred density field (rounded sides), its surface and its water surface as section quads with world-tiled UVs, light and sprites; `TerrainMode` toggle | `SmoothTerrainWorldRules.smoothness()`, bundled smooth terrain (policy half) | done |
 | `src/terrain.rs` — smooth terrain in game: the `add_section_geometry` renderer, the `block_render_visibility` block part for ground, and the live switch through `refresh_render_visibility` | `SmoothTerrainTogglePacket`, bundled mod's render hooks | done, not yet seen in game |
-| `src/hooks.rs` — the game-facing glue: a surveyor-stake right-click plants a housing stake in that player's session, the local player's yellow preview is submitted as world geometry every frame, and `GolemFetching` is read back from its change event | `ClientEvents`, `ServerEvents` (the parts above) | done, not yet seen in game |
+| `src/hooks.rs` — the game-facing glue: a surveyor-stake right-click plants a housing stake in that player's session *and queues the stake block for the next tick*, the local player's yellow preview is submitted as world geometry every frame, `GolemFetching` is read back from its change event, and the server tick flushes queued writes and ticks the enlisted golems, writing each `Placed` action | `ClientEvents`, `ServerEvents` (the parts above) | done, not yet seen in game |
 | `data/`, `assets/` — package content: `buildertools:surveyor_stake`, a sign-templated block (player-facing `rotation`/`facing`, thin plate collision) with a post-only model and its default block item | API 0.2 content files, see [CONTENT.md](CONTENT.md) | done |
 | `src/core/arch.rs` — voussoir arch radius, arc split, fan fallback, face frame, wedge corners, `RegionArch::Bezier` | `util/ArchGeometry.java`, `util/FaceFrame.java` | done |
 | `src/core/bezier.rs` — quadratic Bézier band, arc-length split, extension, surface | `util/BezierGeometry.java` | done |
@@ -52,7 +54,7 @@ The loader-independent half of the mod is ported and covered by unit tests (`car
 | `src/lib.rs` — the `Hooks` root | `BuilderToolsMod` | scaffold only |
 
 The region ops, all three curved shapes, the off-grid boxes and the mesher are covered by tests:
-`cargo test` runs all 248 of them, including the shape identities (voussoir tiling, ellipse closure, 1 m thickness), the
+`cargo test` runs all 256 of them, including the shape identities (voussoir tiling, ellipse closure, 1 m thickness), the
 tessellation invariants (34 quads and 68 triangles per voussoir, tile-split UV phases, face normals
 on the expected axis) and the numerical checks in `core::fast`.
 
@@ -68,10 +70,13 @@ in `hooks.rs`. What is still missing, or limited by API 0.2:
 * **Tool commands** — the command set is parsed (`src/commands.rs`) and the tools compute, but no
   command is registered: `register_commands` and `run_mod_command` are not wired, so in game the
   only way to plant a stake is the surveyor item itself.
-* **Applying edits** — the port computes change batches and packs them (`core::edit::BlockEdit`,
-  equivalence-tested against the per-cell writes), but `edit_blocks` takes host `BlockState`s and
-  the core's `BlockId`s are opaque: the table from one to the other belongs to the tool layer that
-  picks a block, which is the same gap as the commands above.
+* **Applying edits** — wired: `core::palette` names the ids, `rig::register_palette` turns them into
+  host `BlockKey`s at registration, `rig::apply_changes` translates a packed `core::edit::BlockEdit`
+  into the host's own (states in the palette, column runs unchanged) and calls `edit_blocks` once for
+  the whole batch. The two live consumers are the surveyor stake (queued by the click, written on the
+  next tick) and the golem tick (`Placed` actions, one bulk edit each). What is still missing is the
+  *tools'* own entry point — the commands that would pack a wall — because command registration is
+  not wired.
 * **Preview submission** — wired for what exists: `render_level_stage` submits the local player's
   housing preview as `WorldQuad`/`WorldLine` geometry. The command tools' previews (paths,
   territories, arches) appear once those tools can plant their stakes.
